@@ -4,18 +4,30 @@
 // https://github.com/kekyo/emsdk-env
 
 import { describe, expect, test, vi } from 'vitest';
-import { prepareEmsdk } from '../../src/index';
+import { buildWasm } from '../../src/index';
 import emsdkEnv from '../../src/vite/index';
 
 vi.mock('../../src/index', () => ({
-  prepareEmsdk: vi.fn().mockResolvedValue('/mock/emsdk'),
+  buildWasm: vi.fn().mockResolvedValue({
+    emsdkRoot: '/mock/emsdk',
+    outFiles: {},
+  }),
 }));
 
 describe('emsdkEnv', () => {
-  test('runs prepareEmsdk before build', async () => {
+  test('runs buildWasm before build', async () => {
     const options = {
-      targetVersion: '3.1.0',
-      cacheDir: '/mock/cache',
+      emsdk: {
+        targetVersion: '3.1.0',
+        cacheDir: '/mock/cache',
+      },
+      recipe: {
+        targets: {
+          target1: {
+            sources: ['wasm/**/*.c'],
+          },
+        },
+      },
     };
     const plugin = emsdkEnv(options);
 
@@ -23,9 +35,26 @@ describe('emsdkEnv', () => {
     expect(plugin.apply).toBe('build');
     expect(plugin.enforce).toBe('pre');
 
+    await (plugin.configResolved as any)?.call({} as unknown as object, {
+      root: '/mock/root',
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      },
+      logLevel: 'info',
+    });
     await (plugin.buildStart as any).call({} as unknown as object);
 
-    expect(prepareEmsdk).toHaveBeenCalledTimes(1);
-    expect(prepareEmsdk).toHaveBeenCalledWith(options);
+    expect(buildWasm).toHaveBeenCalledTimes(1);
+    expect(buildWasm).toHaveBeenCalledWith({
+      emsdk: options.emsdk,
+      recipe: options.recipe,
+      root: '/mock/root',
+      srcDir: undefined,
+      outDir: undefined,
+      buildDir: undefined,
+      logger: expect.any(Object),
+    });
   });
 });
