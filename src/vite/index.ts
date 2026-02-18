@@ -5,12 +5,12 @@
 
 import type { Plugin, ResolvedConfig } from 'vite';
 import { buildWasm } from '../index';
-import type { PrepareEmsdkOptions, WasmBuildRecipe } from '../index';
+import type { PrepareEmsdkOptions, WasmBuildRule } from '../index';
 import { createViteLoggerAdapter } from './logger';
 
 export type EmsdkVitePluginOptions = {
   emsdk: PrepareEmsdkOptions;
-  recipe: WasmBuildRecipe;
+  rule: WasmBuildRule;
   srcDir?: string;
   outDir?: string;
   buildDir?: string;
@@ -36,7 +36,7 @@ const emsdkEnv = (options: EmsdkVitePluginOptions): Plugin => {
       );
       const buildOptions = {
         emsdk: options.emsdk,
-        recipe: options.recipe,
+        rule: options.rule,
         root: resolvedConfig.root,
         logger,
         ...(options.srcDir !== undefined ? { srcDir: options.srcDir } : {}),

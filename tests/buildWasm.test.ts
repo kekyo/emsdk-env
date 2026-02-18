@@ -183,7 +183,7 @@ describe('buildWasm', () => {
           repoUrl: mockRepo.repoUrl,
         },
         root: projectRoot,
-        recipe: {
+        rule: {
           common: {
             options: ['-g'],
             defines: {

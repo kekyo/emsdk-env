@@ -21,7 +21,7 @@ describe('emsdkEnv', () => {
         targetVersion: '3.1.0',
         cacheDir: '/mock/cache',
       },
-      recipe: {
+      rule: {
         targets: {
           target1: {
             sources: ['wasm/**/*.c'],
@@ -49,7 +49,7 @@ describe('emsdkEnv', () => {
     expect(buildWasm).toHaveBeenCalledTimes(1);
     expect(buildWasm).toHaveBeenCalledWith({
       emsdk: options.emsdk,
-      recipe: options.recipe,
+      rule: options.rule,
       root: '/mock/root',
       srcDir: undefined,
       outDir: undefined,

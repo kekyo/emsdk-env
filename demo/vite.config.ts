@@ -12,7 +12,7 @@ export default defineConfig({
       emsdk: {
         targetVersion: 'latest',
       },
-      recipe: {
+      rule: {
         common: {
           options: ['-O3', '-std=c99'],
           linkOptions: ['-s', 'STANDALONE_WASM=1', '--no-entry'],

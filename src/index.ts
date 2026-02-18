@@ -24,6 +24,7 @@ export type PrepareEmsdkOptions = {
   cacheDir?: string;
   repoUrl?: string;
   gitPath?: string;
+  signal?: AbortSignal;
 };
 
 export type DefineValue = string | number | boolean;
@@ -44,19 +45,20 @@ export type WasmBuildTarget = {
   defines?: Record<string, DefineValue>;
 };
 
-export type WasmBuildRecipe = {
+export type WasmBuildRule = {
   common?: WasmBuildCommonOptions;
   targets: Record<string, WasmBuildTarget>;
 };
 
 export type BuildWasmOptions = {
   emsdk: PrepareEmsdkOptions;
-  recipe: WasmBuildRecipe;
+  rule: WasmBuildRule;
   root?: string;
   srcDir?: string;
   outDir?: string;
   buildDir?: string;
   logger?: Logger;
+  signal?: AbortSignal;
 };
 
 export type BuildWasmResult = {
@@ -463,12 +465,12 @@ export const buildWasm = async (
   if (!options.emsdk) {
     throw new TypeError('emsdk options must be provided.');
   }
-  if (!options.recipe || !options.recipe.targets) {
-    throw new TypeError('recipe targets must be provided.');
+  if (!options.rule || !options.rule.targets) {
+    throw new TypeError('rule targets must be provided.');
   }
-  const targets = Object.entries(options.recipe.targets);
+  const targets = Object.entries(options.rule.targets);
   if (targets.length === 0) {
-    throw new TypeError('recipe targets must not be empty.');
+    throw new TypeError('rule targets must not be empty.');
   }
 
   const logger = options.logger ?? createConsoleLogger('emsdk-env');
@@ -511,7 +513,7 @@ export const buildWasm = async (
   };
 
   const emccCommand = await resolveEmccCommand(envWithDirs, emsdkRoot);
-  const common = options.recipe.common ?? {};
+  const common = options.rule.common ?? {};
 
   await ensureDirectory(outDir);
   await ensureDirectory(buildDir);
