@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "demo": "node scripts/run.mjs"
+    "dev": "vite dev"
   },
   "dependencies": {
     "emsdk-env": "file:.."

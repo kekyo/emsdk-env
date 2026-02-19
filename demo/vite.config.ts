@@ -24,12 +24,7 @@ export default defineConfig({
       },
     }),
   ],
-  build: {
-    lib: {
-      entry: 'src/main.ts',
-      formats: ['es'],
-      fileName: 'index',
-    },
-    emptyOutDir: false,
+  server: {
+    open: true,
   },
 });
