@@ -8,7 +8,6 @@ import { constants, access, mkdtemp, mkdir, rename, rm } from 'fs/promises';
 import { homedir } from 'os';
 import { join, resolve, isAbsolute, relative } from 'path';
 import { createMutex } from 'async-primitives';
-import { simpleGit, type SimpleGitOptions } from 'simple-git';
 import { glob } from 'glob';
 import { Logger, createConsoleLogger } from './logger';
 
@@ -58,7 +57,6 @@ export type BuildWasmOptions = {
   outDir?: string;
   buildDir?: string;
   logger?: Logger;
-  signal?: AbortSignal;
 };
 
 export type BuildWasmResult = {
@@ -83,6 +81,18 @@ const ensureNonEmpty = (value: string, label: string) => {
   }
 };
 
+const createAbortError = () => {
+  const error = new Error('The operation was aborted.');
+  error.name = 'AbortError';
+  return error;
+};
+
+const throwIfAborted = (signal?: AbortSignal) => {
+  if (signal?.aborted) {
+    throw createAbortError();
+  }
+};
+
 const sanitizeSegment = (value: string) => {
   const trimmed = value.trim();
   ensureNonEmpty(trimmed, 'targetVersion');
@@ -102,16 +112,49 @@ const pathExists = async (targetPath: string) => {
   }
 };
 
-const runCommand = async (command: string, args: string[], cwd: string) =>
-  new Promise<void>((resolvePromise, rejectPromise) => {
+const runCommand = async (
+  command: string,
+  args: string[],
+  cwd: string,
+  signal?: AbortSignal
+) => {
+  throwIfAborted(signal);
+  return new Promise<void>((resolvePromise, rejectPromise) => {
     const child = spawn(command, args, {
       cwd,
       stdio: 'inherit',
     });
+    let settled = false;
+    const onAbort = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      child.kill();
+      rejectPromise(createAbortError());
+    };
+    if (signal) {
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+    const cleanup = () => {
+      if (signal) {
+        signal.removeEventListener('abort', onAbort);
+      }
+    };
     child.once('error', (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
       rejectPromise(error);
     });
     child.once('close', (code) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
       if (code === 0) {
         resolvePromise();
         return;
@@ -123,22 +166,36 @@ const runCommand = async (command: string, args: string[], cwd: string) =>
       );
     });
   });
+};
 
 const resolveEmsdkCommand = () =>
   process.platform === 'win32' ? 'emsdk.bat' : './emsdk';
 
-const createGitClient = (baseDir: string, gitPath: string) =>
-  simpleGit({
-    baseDir,
-    binary: gitPath,
-  } satisfies Partial<SimpleGitOptions>);
-
-const runEmsdk = async (repoDir: string, args: string[]) => {
+const runEmsdk = async (
+  repoDir: string,
+  args: string[],
+  signal?: AbortSignal
+) => {
   if (process.platform === 'win32') {
-    await runCommand('cmd', ['/c', 'emsdk.bat', ...args], repoDir);
+    await runCommand('cmd', ['/c', 'emsdk.bat', ...args], repoDir, signal);
     return;
   }
-  await runCommand(resolveEmsdkCommand(), args, repoDir);
+  await runCommand(resolveEmsdkCommand(), args, repoDir, signal);
+};
+
+const runGitClone = async (
+  gitPath: string,
+  repoUrl: string,
+  targetDir: string,
+  cwd: string,
+  signal?: AbortSignal
+) => {
+  await runCommand(
+    gitPath,
+    ['clone', repoUrl, targetDir, '--depth', '1', '--branch', DEFAULT_GIT_REF],
+    cwd,
+    signal
+  );
 };
 
 const ensureDirectory = async (targetPath: string) => {
@@ -163,6 +220,7 @@ export const prepareEmsdk = async (
     throw new TypeError('targetVersion must be a string.');
   }
   ensureNonEmpty(options.targetVersion, 'targetVersion');
+  throwIfAborted(options.signal);
 
   const cacheDir = resolve(options.cacheDir ?? DEFAULT_CACHE_DIR);
   const repoUrl = options.repoUrl ?? DEFAULT_REPO_URL;
@@ -172,8 +230,9 @@ export const prepareEmsdk = async (
   const finalDir = resolve(cacheDir, versionDir);
 
   const mutex = getVersionMutex(finalDir);
-  const lock = await mutex.lock();
+  const lock = await mutex.lock(options.signal);
   try {
+    throwIfAborted(options.signal);
     if (await pathExists(finalDir)) {
       return finalDir;
     }
@@ -184,14 +243,19 @@ export const prepareEmsdk = async (
     const tempRepoDir = join(tempRoot, 'emsdk');
 
     try {
-      const git = createGitClient(cacheDir, gitPath);
-      await git.clone(repoUrl, tempRepoDir, [
-        '--depth',
-        '1',
-        '--branch',
-        DEFAULT_GIT_REF,
-      ]);
-      await runEmsdk(tempRepoDir, ['install', options.targetVersion]);
+      await runGitClone(
+        gitPath,
+        repoUrl,
+        tempRepoDir,
+        cacheDir,
+        options.signal
+      );
+      throwIfAborted(options.signal);
+      await runEmsdk(
+        tempRepoDir,
+        ['install', options.targetVersion],
+        options.signal
+      );
 
       try {
         await rename(tempRepoDir, finalDir);
@@ -205,7 +269,12 @@ export const prepareEmsdk = async (
       await rm(tempRoot, { recursive: true, force: true });
     }
 
-    await runEmsdk(finalDir, ['activate', options.targetVersion]);
+    throwIfAborted(options.signal);
+    await runEmsdk(
+      finalDir,
+      ['activate', options.targetVersion],
+      options.signal
+    );
     return finalDir;
   } finally {
     lock.release();
@@ -229,18 +298,47 @@ const runCommandWithEnv = async (
   command: string,
   args: string[],
   cwd: string,
-  env: NodeJS.ProcessEnv
-) =>
-  new Promise<void>((resolvePromise, rejectPromise) => {
+  env: NodeJS.ProcessEnv,
+  signal?: AbortSignal
+) => {
+  throwIfAborted(signal);
+  return new Promise<void>((resolvePromise, rejectPromise) => {
     const child = spawn(command, args, {
       cwd,
       env,
       stdio: 'inherit',
     });
+    let settled = false;
+    const onAbort = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      child.kill();
+      rejectPromise(createAbortError());
+    };
+    if (signal) {
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+    const cleanup = () => {
+      if (signal) {
+        signal.removeEventListener('abort', onAbort);
+      }
+    };
     child.once('error', (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
       rejectPromise(error);
     });
     child.once('close', (code) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
       if (code === 0) {
         resolvePromise();
         return;
@@ -252,19 +350,39 @@ const runCommandWithEnv = async (
       );
     });
   });
+};
 
 const runCommandCapture = async (
   command: string,
   args: string[],
-  cwd: string
-) =>
-  new Promise<Buffer>((resolvePromise, rejectPromise) => {
+  cwd: string,
+  signal?: AbortSignal
+) => {
+  throwIfAborted(signal);
+  return new Promise<Buffer>((resolvePromise, rejectPromise) => {
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
     const child = spawn(command, args, {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    let settled = false;
+    const onAbort = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      child.kill();
+      rejectPromise(createAbortError());
+    };
+    if (signal) {
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+    const cleanup = () => {
+      if (signal) {
+        signal.removeEventListener('abort', onAbort);
+      }
+    };
     child.stdout.on('data', (chunk: Buffer) => {
       stdoutChunks.push(chunk);
     });
@@ -272,9 +390,19 @@ const runCommandCapture = async (
       stderrChunks.push(chunk);
     });
     child.once('error', (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
       rejectPromise(error);
     });
     child.once('close', (code) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
       if (code === 0) {
         resolvePromise(Buffer.concat(stdoutChunks));
         return;
@@ -289,6 +417,7 @@ const runCommandCapture = async (
       );
     });
   });
+};
 
 const parseEnvBuffer = (buffer: Buffer) => {
   const entries = buffer.toString('utf8').split('\u0000');
