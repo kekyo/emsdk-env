@@ -4,17 +4,12 @@
 // https://github.com/kekyo/emsdk-env
 
 import type { Plugin, ResolvedConfig } from 'vite';
-import { buildWasm } from '../index';
-import type { PrepareEmsdkOptions, WasmBuildRule } from '../index';
-import { createViteLoggerAdapter } from './logger';
 
-export type EmsdkVitePluginOptions = {
-  emsdk: PrepareEmsdkOptions;
-  rule: WasmBuildRule;
-  srcDir?: string;
-  outDir?: string;
-  buildDir?: string;
-};
+import { EmsdkVitePluginOptions } from './types';
+import { createViteLoggerAdapter } from './logger';
+import { buildWasm } from '../index';
+
+/////////////////////////////////////////////////////////////////////////////////////////////////
 
 const emsdkEnv = (options: EmsdkVitePluginOptions): Plugin => {
   let resolvedConfig: ResolvedConfig | undefined;
@@ -34,16 +29,15 @@ const emsdkEnv = (options: EmsdkVitePluginOptions): Plugin => {
         resolvedConfig.logLevel ?? 'info',
         'emsdk-env'
       );
+      const { emsdk, srcDir, outDir, buildDir, ...rule } = options;
       const buildOptions = {
-        emsdk: options.emsdk,
-        rule: options.rule,
+        emsdk,
+        rule,
         root: resolvedConfig.root,
         logger,
-        ...(options.srcDir !== undefined ? { srcDir: options.srcDir } : {}),
-        ...(options.outDir !== undefined ? { outDir: options.outDir } : {}),
-        ...(options.buildDir !== undefined
-          ? { buildDir: options.buildDir }
-          : {}),
+        ...(srcDir !== undefined ? { srcDir } : {}),
+        ...(outDir !== undefined ? { outDir } : {}),
+        ...(buildDir !== undefined ? { buildDir } : {}),
       };
       await buildWasm(buildOptions);
     },

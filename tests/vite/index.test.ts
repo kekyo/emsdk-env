@@ -4,6 +4,7 @@
 // https://github.com/kekyo/emsdk-env
 
 import { describe, expect, test, vi } from 'vitest';
+
 import { buildWasm } from '../../src/index';
 import emsdkEnv from '../../src/vite/index';
 
@@ -21,11 +22,9 @@ describe('emsdkEnv', () => {
         targetVersion: '3.1.0',
         cacheDir: '/mock/cache',
       },
-      rule: {
-        targets: {
-          target1: {
-            sources: ['wasm/**/*.c'],
-          },
+      targets: {
+        target1: {
+          sources: ['wasm/**/*.c'],
         },
       },
     };
@@ -49,7 +48,9 @@ describe('emsdkEnv', () => {
     expect(buildWasm).toHaveBeenCalledTimes(1);
     expect(buildWasm).toHaveBeenCalledWith({
       emsdk: options.emsdk,
-      rule: options.rule,
+      rule: {
+        targets: options.targets,
+      },
       root: '/mock/root',
       srcDir: undefined,
       outDir: undefined,

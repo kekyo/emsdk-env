@@ -9,7 +9,6 @@ import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-
 import { describe, expect, test } from 'vitest';
 
 import { prepareEmsdk } from '../src/index';

@@ -17,7 +17,6 @@ import {
 import { tmpdir } from 'os';
 import { join, resolve } from 'path';
 import { pathToFileURL } from 'url';
-
 import { describe, expect, test } from 'vitest';
 
 import { buildWasm } from '../src/index';

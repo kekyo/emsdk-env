@@ -12,16 +12,14 @@ export default defineConfig({
       emsdk: {
         targetVersion: 'latest',
       },
-      rule: {
-        common: {
-          options: ['-O3', '-std=c99'],
-          linkOptions: ['-s', 'STANDALONE_WASM=1', '--no-entry'],
-        },
-        targets: {
-          add: {
-            sources: ['wasm/add.c'],
-            linkOptions: ['-s', 'EXPORTED_FUNCTIONS=["_add"]'],
-          },
+      common: {
+        options: ['-O3', '-std=c99'],
+        linkOptions: ['-s', 'STANDALONE_WASM=1', '--no-entry'],
+      },
+      targets: {
+        add: {
+          sources: ['wasm/add.c'],
+          linkOptions: ['-s', 'EXPORTED_FUNCTIONS=["_add"]'],
         },
       },
     }),

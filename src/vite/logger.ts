@@ -5,7 +5,10 @@
 
 import type { LogLevel, Logger as ViteLogger } from 'vite';
 import createDebug from 'debug';
-import { Logger } from '../logger';
+
+import { Logger } from '../types';
+
+/////////////////////////////////////////////////////////////////////////////////////////////////
 
 // Vite logger adapter with prefix
 export const createViteLoggerAdapter = (
