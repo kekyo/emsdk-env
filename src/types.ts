@@ -32,7 +32,7 @@ export interface Logger {
 }
 
 export interface PrepareEmsdkOptions {
-  targetVersion: string;
+  targetVersion?: string;
   cacheDir?: string;
   repoUrl?: string;
   gitPath?: string;
@@ -65,7 +65,7 @@ export interface WasmBuildRule {
 }
 
 export interface BuildWasmOptions {
-  emsdk: PrepareEmsdkOptions;
+  emsdk?: PrepareEmsdkOptions;
   rule: WasmBuildRule;
   root?: string;
   srcDir?: string;

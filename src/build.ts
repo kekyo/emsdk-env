@@ -12,17 +12,33 @@ import { loadEmsdkEnv, resolveEmccCommand } from './env';
 import { prepareEmsdk } from './emsdk';
 import { ensureDirectory } from './fs-utils';
 import { createConsoleLogger } from './logger';
-import type { BuildWasmOptions, BuildWasmResult, DefineValue } from './types';
+import type {
+  BuildWasmOptions,
+  BuildWasmResult,
+  DefineValue,
+  PrepareEmsdkOptions,
+} from './types';
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
 const DEFAULT_WASM_SRC_DIR = 'wasm';
 const DEFAULT_WASM_OUT_DIR = join('src', 'wasm');
 const DEFAULT_WASM_BUILD_DIR = '.wasm-build';
+const DEFAULT_EMSDK_TARGET_VERSION = 'latest';
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
 const ensureArray = (value?: string[]) => (value ? [...value] : []);
+
+const normalizePrepareOptions = (
+  options: PrepareEmsdkOptions | undefined
+): PrepareEmsdkOptions => {
+  const { targetVersion, ...rest } = options ?? {};
+  return {
+    targetVersion: targetVersion ?? DEFAULT_EMSDK_TARGET_VERSION,
+    ...rest,
+  };
+};
 
 const mergeDefines = (
   common?: Record<string, DefineValue>,
@@ -159,9 +175,6 @@ export const buildWasm = async (
   if (!options) {
     throw new TypeError('options must be provided.');
   }
-  if (!options.emsdk) {
-    throw new TypeError('emsdk options must be provided.');
-  }
   if (!options.rule || !options.rule.targets) {
     throw new TypeError('rule targets must be provided.');
   }
@@ -173,8 +186,9 @@ export const buildWasm = async (
   const logger = options.logger ?? createConsoleLogger('emsdk-env');
   const rootDir = resolve(options.root ?? process.cwd());
 
-  const emsdkRoot = await prepareEmsdk(options.emsdk);
-  const emsdkEnv = await loadEmsdkEnv(emsdkRoot, logger, options.emsdk.signal);
+  const emsdkOptions = normalizePrepareOptions(options.emsdk);
+  const emsdkRoot = await prepareEmsdk(emsdkOptions);
+  const emsdkEnv = await loadEmsdkEnv(emsdkRoot, logger, emsdkOptions.signal);
 
   const baseEnv = {
     ...emsdkEnv,
@@ -299,7 +313,7 @@ export const buildWasm = async (
         args,
         rootDir,
         createEnvForBuild(targetEnv, {}),
-        options.emsdk.signal
+        emsdkOptions.signal
       );
       objectFiles.push(outputObject);
     }
@@ -318,7 +332,7 @@ export const buildWasm = async (
       linkArgs,
       rootDir,
       createEnvForBuild(targetEnv, {}),
-      options.emsdk.signal
+      emsdkOptions.signal
     );
 
     outFiles[targetName] = resolvedOutFile;

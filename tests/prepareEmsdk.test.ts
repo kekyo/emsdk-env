@@ -195,6 +195,34 @@ describe.sequential('prepareEmsdk', () => {
     }
   });
 
+  test('defaults to latest when targetVersion is omitted', async () => {
+    const mockRepo = await createMockRepo();
+    const cacheDir = await mkdtemp(join(workspaceRoot, '.test-cache-'));
+    try {
+      const result = await prepareEmsdk({
+        cacheDir,
+        repoUrl: mockRepo.repoUrl,
+      });
+
+      const expectedDir = resolve(cacheDir, 'latest');
+      expect(result).toBe(expectedDir);
+      expect(existsSync(expectedDir)).toBe(true);
+
+      const installVersion = await readRequiredFile(
+        join(expectedDir, '.install-version')
+      );
+      const activateVersion = await readRequiredFile(
+        join(expectedDir, '.activate-version')
+      );
+
+      expect(installVersion).toBe('latest');
+      expect(activateVersion).toBe('latest');
+    } finally {
+      await mockRepo.cleanup();
+      await rm(cacheDir, { recursive: true, force: true });
+    }
+  });
+
   test('returns existing path without rerunning activate', async () => {
     const mockRepo = await createMockRepo();
     const cacheDir = await mkdtemp(join(workspaceRoot, '.test-cache-'));

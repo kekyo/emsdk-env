@@ -8,7 +8,7 @@ import { PrepareEmsdkOptions, WasmBuildRule } from '../types';
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
 export interface EmsdkVitePluginOptions extends WasmBuildRule {
-  emsdk: PrepareEmsdkOptions;
+  emsdk?: PrepareEmsdkOptions;
   srcDir?: string;
   outDir?: string;
   buildDir?: string;

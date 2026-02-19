@@ -17,6 +17,7 @@ import type { PrepareEmsdkOptions } from './types';
 const DEFAULT_REPO_URL = 'https://github.com/emscripten-core/emsdk.git';
 const DEFAULT_GIT_REF = 'main';
 const DEFAULT_CACHE_DIR = join(homedir(), '.cache', 'emsdk-env');
+const DEFAULT_TARGET_VERSION = 'latest';
 
 const versionMutexes = new Map<string, ReturnType<typeof createMutex>>();
 
@@ -53,7 +54,7 @@ const resolveEmsdkCommand = () =>
 const runEmsdk = async (
   repoDir: string,
   args: string[],
-  signal?: AbortSignal
+  signal: AbortSignal | undefined
 ) => {
   if (process.platform === 'win32') {
     await runCommand('cmd', ['/c', 'emsdk.bat', ...args], repoDir, signal);
@@ -67,7 +68,7 @@ const runGitClone = async (
   repoUrl: string,
   targetDir: string,
   cwd: string,
-  signal?: AbortSignal
+  signal: AbortSignal | undefined
 ) => {
   await runCommand(
     gitPath,
@@ -93,17 +94,21 @@ export const prepareEmsdk = async (
   if (!options) {
     throw new TypeError('options must be provided.');
   }
-  if (typeof options.targetVersion !== 'string') {
+  if (
+    options.targetVersion !== undefined &&
+    typeof options.targetVersion !== 'string'
+  ) {
     throw new TypeError('targetVersion must be a string.');
   }
-  ensureNonEmpty(options.targetVersion, 'targetVersion');
+  const targetVersion = options.targetVersion ?? DEFAULT_TARGET_VERSION;
+  ensureNonEmpty(targetVersion, 'targetVersion');
   options.signal?.throwIfAborted();
 
   const cacheDir = resolve(options.cacheDir ?? DEFAULT_CACHE_DIR);
   const repoUrl = options.repoUrl ?? DEFAULT_REPO_URL;
   const gitPath = options.gitPath ?? 'git';
 
-  const versionDir = sanitizeSegment(options.targetVersion);
+  const versionDir = sanitizeSegment(targetVersion);
   const finalDir = resolve(cacheDir, versionDir);
 
   const mutex = getVersionMutex(finalDir);
@@ -128,11 +133,7 @@ export const prepareEmsdk = async (
         options.signal
       );
       options.signal?.throwIfAborted();
-      await runEmsdk(
-        tempRepoDir,
-        ['install', options.targetVersion],
-        options.signal
-      );
+      await runEmsdk(tempRepoDir, ['install', targetVersion], options.signal);
 
       try {
         await rename(tempRepoDir, finalDir);
@@ -147,11 +148,7 @@ export const prepareEmsdk = async (
     }
 
     options.signal?.throwIfAborted();
-    await runEmsdk(
-      finalDir,
-      ['activate', options.targetVersion],
-      options.signal
-    );
+    await runEmsdk(finalDir, ['activate', targetVersion], options.signal);
     return finalDir;
   } finally {
     lock.release();

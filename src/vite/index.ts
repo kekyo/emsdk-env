@@ -31,10 +31,10 @@ const emsdkEnv = (options: EmsdkVitePluginOptions): Plugin => {
       );
       const { emsdk, srcDir, outDir, buildDir, ...rule } = options;
       const buildOptions = {
-        emsdk,
         rule,
         root: resolvedConfig.root,
         logger,
+        ...(emsdk !== undefined ? { emsdk } : {}),
         ...(srcDir !== undefined ? { srcDir } : {}),
         ...(outDir !== undefined ? { outDir } : {}),
         ...(buildDir !== undefined ? { buildDir } : {}),
