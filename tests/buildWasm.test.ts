@@ -175,6 +175,7 @@ describe('buildWasm', () => {
     await writeFile(join(wasmDir, 'beta.cpp'), 'int beta() { return 2; }');
 
     try {
+      const buildRoot = join(projectRoot, '.wasm-build');
       const result = await buildWasm({
         emsdk: {
           targetVersion: 'test-version',
@@ -182,6 +183,8 @@ describe('buildWasm', () => {
           repoUrl: mockRepo.repoUrl,
         },
         root: projectRoot,
+        buildDir: buildRoot,
+        cleanupBuildDir: false,
         rule: {
           common: {
             options: ['-g'],
@@ -194,7 +197,7 @@ describe('buildWasm', () => {
           targets: {
             target1: {
               outFile: '{OUT_DIR}/custom.wasm',
-              sources: ['{SRC_DIR}/alpha.c'],
+              sources: ['alpha.c'],
               options: ['-O3'],
               linkOptions: ['-s', 'ALLOW_MEMORY_GROWTH=1'],
               exports: ['_target1'],
@@ -220,12 +223,16 @@ describe('buildWasm', () => {
       expect(existsSync(target1Out)).toBe(true);
       expect(existsSync(target2Out)).toBe(true);
 
-      const target1Objects = await readdir(
-        resolve(projectRoot, '.wasm-build', 'target1')
-      );
-      const target2Objects = await readdir(
-        resolve(projectRoot, '.wasm-build', 'target2')
-      );
+      const buildRuns = await readdir(buildRoot);
+      expect(buildRuns.length).toBe(1);
+      const buildRunName = buildRuns[0];
+      if (!buildRunName) {
+        throw new Error('Missing build output directory.');
+      }
+      const buildRunDir = resolve(buildRoot, buildRunName);
+      expect(buildRunName).toMatch(/^\d{8}_\d{6}_\d{4}_\d+$/);
+      const target1Objects = await readdir(resolve(buildRunDir, 'target1'));
+      const target2Objects = await readdir(resolve(buildRunDir, 'target2'));
       expect(target1Objects.filter((name) => name.endsWith('.o')).length).toBe(
         1
       );
@@ -237,10 +244,11 @@ describe('buildWasm', () => {
       expect(existsSync(emccLogPath)).toBe(true);
       const emccLogText = await readFile(emccLogPath, 'utf8');
       const calls = parseEmccLog(emccLogText);
+      const target1BuildPath = resolve(buildRunDir, 'target1');
       const target1Compile = calls.find(
         (args) =>
           args.includes('-c') &&
-          args.some((arg) => arg.includes(`${join('.wasm-build', 'target1')}`))
+          args.some((arg) => arg.startsWith(target1BuildPath))
       );
       expect(target1Compile).toBeTruthy();
       if (!target1Compile) {
@@ -250,10 +258,11 @@ describe('buildWasm', () => {
       expect(target1Compile).toContain('-D_DEBUG=true');
       expect(target1Compile).not.toContain('-DSIMD_ENABLED=0');
 
+      const target2BuildPath = resolve(buildRunDir, 'target2');
       const target2CompileCalls = calls.filter(
         (args) =>
           args.includes('-c') &&
-          args.some((arg) => arg.includes(`${join('.wasm-build', 'target2')}`))
+          args.some((arg) => arg.startsWith(target2BuildPath))
       );
       expect(target2CompileCalls.length).toBe(2);
       for (const call of target2CompileCalls) {

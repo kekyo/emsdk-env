@@ -12,4 +12,5 @@ export interface EmsdkVitePluginOptions extends WasmBuildRule {
   srcDir?: string;
   outDir?: string;
   buildDir?: string;
+  cleanupBuildDir?: boolean;
 }

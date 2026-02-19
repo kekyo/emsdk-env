@@ -74,7 +74,7 @@ export default defineConfig({
       },
       targets: {
         add: {
-          sources: ['wasm/add.c'],
+          sources: ['add.c'],
           exports: ['_add'],
         },
       },

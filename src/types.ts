@@ -71,6 +71,8 @@ export interface BuildWasmOptions {
   srcDir?: string;
   outDir?: string;
   buildDir?: string;
+  cleanupBuildDir?: boolean;
+  parallel?: boolean;
   logger?: Logger;
 }
 

@@ -4,6 +4,7 @@
 // https://github.com/kekyo/emsdk-env
 
 import { rm } from 'fs/promises';
+import { tmpdir } from 'os';
 import { glob } from 'glob';
 import { isAbsolute, join, relative, resolve } from 'path';
 
@@ -23,10 +24,32 @@ import type {
 
 const DEFAULT_WASM_SRC_DIR = 'wasm';
 const DEFAULT_WASM_OUT_DIR = join('src', 'wasm');
-const DEFAULT_WASM_BUILD_DIR = '.wasm-build';
+const DEFAULT_WASM_BUILD_DIR = join(tmpdir(), 'emsdk-env');
 const DEFAULT_EMSDK_TARGET_VERSION = 'latest';
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
+
+let buildSequence = 0;
+
+const padNumber = (value: number, length = 2) =>
+  String(value).padStart(length, '0');
+
+const formatTimestamp = (date: Date) => {
+  const year = date.getFullYear();
+  const month = padNumber(date.getMonth() + 1);
+  const day = padNumber(date.getDate());
+  const hour = padNumber(date.getHours());
+  const minute = padNumber(date.getMinutes());
+  const second = padNumber(date.getSeconds());
+  return `${year}${month}${day}_${hour}${minute}${second}`;
+};
+
+const createBuildId = () => {
+  buildSequence += 1;
+  const timestamp = formatTimestamp(new Date());
+  const seq = String(buildSequence).padStart(4, '0');
+  return `${timestamp}_${seq}_${process.pid}`;
+};
 
 const ensureArray = (value?: string[]) => (value ? [...value] : []);
 
@@ -106,10 +129,10 @@ const resolveOutFile = (
 const resolveSourcePatterns = (
   patterns: string[],
   env: Record<string, string>,
-  rootDir: string
+  srcDir: string
 ) => {
   const expanded = expandArray(patterns, env, 'sources');
-  return expanded.map((value) => resolvePath(rootDir, value));
+  return expanded.map((value) => resolvePath(srcDir, value));
 };
 
 const buildDefineFlags = (defines: Record<string, DefineValue>) =>
@@ -146,14 +169,13 @@ const resolveTargetOutFile = (
 const resolveTargetSources = async (
   targetSources: string[] | undefined,
   env: Record<string, string>,
-  rootDir: string,
   srcDir: string
 ) => {
   const patterns =
     targetSources && targetSources.length > 0
       ? targetSources
       : [join(srcDir, '**', '*.c'), join(srcDir, '**', '*.cpp')];
-  const resolvedPatterns = resolveSourcePatterns(patterns, env, rootDir);
+  const resolvedPatterns = resolveSourcePatterns(patterns, env, srcDir);
   const results = await Promise.all(
     resolvedPatterns.map((pattern) => glob(pattern, { nodir: true }))
   );
@@ -214,6 +236,10 @@ export const buildWasm = async (
   const srcDir = resolvePath(rootDir, rawSrcDir);
   const outDir = resolvePath(rootDir, rawOutDir);
   const buildDir = resolvePath(rootDir, rawBuildDir);
+  const buildId = createBuildId();
+  const buildRunDir = resolve(buildDir, buildId);
+  const cleanupBuildDir = options.cleanupBuildDir ?? true;
+  const parallel = options.parallel ?? true;
 
   const envWithDirs = {
     ...emsdkEnv,
@@ -228,114 +254,131 @@ export const buildWasm = async (
 
   await ensureDirectory(outDir);
   await ensureDirectory(buildDir);
+  await rm(buildRunDir, { recursive: true, force: true });
+  await ensureDirectory(buildRunDir);
 
   const outFiles: Record<string, string> = {};
 
-  for (const [targetName, target] of targets) {
-    const mergedOptions = [
-      ...ensureArray(common.options),
-      ...ensureArray(target.options),
-    ];
-    const mergedLinkOptions = [
-      ...ensureArray(common.linkOptions),
-      ...ensureArray(target.linkOptions),
-    ];
-    const mergedExports = [
-      ...ensureArray(common.exports),
-      ...ensureArray(target.exports),
-    ];
-    const mergedIncludeDirs = [
-      ...ensureArray(common.includeDirs),
-      ...ensureArray(target.includeDirs),
-    ];
-    const mergedDefines = mergeDefines(common.defines, target.defines);
-
-    const targetEnv = {
-      ...envWithDirs,
-      TARGET_NAME: targetName,
-    };
-
-    const resolvedOutFile = resolveTargetOutFile(
-      targetName,
-      target.outFile,
-      targetEnv,
-      outDir
-    );
-
-    const sources = await resolveTargetSources(
-      target.sources,
-      targetEnv,
-      rootDir,
-      srcDir
-    );
-    if (sources.length === 0) {
-      throw new Error(`No sources matched for target: ${targetName}`);
-    }
-
-    const targetBuildDir = resolve(buildDir, targetName);
-    await rm(targetBuildDir, { recursive: true, force: true });
-    await ensureDirectory(targetBuildDir);
-
-    const resolvedOptions = expandArray(mergedOptions, targetEnv, 'options');
-    const resolvedLinkOptions = expandArray(
-      mergedLinkOptions,
-      targetEnv,
-      'linkOptions'
-    );
-    const resolvedExports = expandArray(mergedExports, targetEnv, 'exports');
-    const exportArgs = buildExportFlags(resolvedExports);
-    const includeArgs = resolveIncludeDirs(
-      mergedIncludeDirs,
-      targetEnv,
-      rootDir
-    ).map((dir) => `-I${dir}`);
-    const defineArgs = buildDefineFlags(
-      resolveDefines(mergedDefines, targetEnv)
-    );
-
-    logger.info(`Compiling target: ${targetName}`);
-    const objectFiles: string[] = [];
-    for (const source of sources) {
-      const objectName = toSafeObjectName(rootDir, source);
-      const outputObject = resolve(targetBuildDir, `${objectName}.o`);
-      const args = [
-        '-c',
-        source,
-        '-o',
-        outputObject,
-        ...resolvedOptions,
-        ...includeArgs,
-        ...defineArgs,
+  try {
+    for (const [targetName, target] of targets) {
+      const mergedOptions = [
+        ...ensureArray(common.options),
+        ...ensureArray(target.options),
       ];
-      logger.debug(`emcc ${args.join(' ')}`);
+      const mergedLinkOptions = [
+        ...ensureArray(common.linkOptions),
+        ...ensureArray(target.linkOptions),
+      ];
+      const mergedExports = [
+        ...ensureArray(common.exports),
+        ...ensureArray(target.exports),
+      ];
+      const mergedIncludeDirs = [
+        ...ensureArray(common.includeDirs),
+        ...ensureArray(target.includeDirs),
+      ];
+      const mergedDefines = mergeDefines(common.defines, target.defines);
+
+      const targetEnv = {
+        ...envWithDirs,
+        TARGET_NAME: targetName,
+      };
+      const buildEnv = createEnvForBuild(targetEnv, {});
+
+      const resolvedOutFile = resolveTargetOutFile(
+        targetName,
+        target.outFile,
+        targetEnv,
+        outDir
+      );
+
+      const sources = await resolveTargetSources(
+        target.sources,
+        targetEnv,
+        srcDir
+      );
+      if (sources.length === 0) {
+        throw new Error(`No sources matched for target: ${targetName}`);
+      }
+
+      const targetBuildDir = resolve(buildRunDir, targetName);
+      await rm(targetBuildDir, { recursive: true, force: true });
+      await ensureDirectory(targetBuildDir);
+
+      const resolvedOptions = expandArray(mergedOptions, targetEnv, 'options');
+      const resolvedLinkOptions = expandArray(
+        mergedLinkOptions,
+        targetEnv,
+        'linkOptions'
+      );
+      const resolvedExports = expandArray(mergedExports, targetEnv, 'exports');
+      const exportArgs = buildExportFlags(resolvedExports);
+      const includeArgs = resolveIncludeDirs(
+        mergedIncludeDirs,
+        targetEnv,
+        rootDir
+      ).map((dir) => `-I${dir}`);
+      const defineArgs = buildDefineFlags(
+        resolveDefines(mergedDefines, targetEnv)
+      );
+
+      logger.info(`Compiling target: ${targetName}`);
+      const compileSource = async (source: string) => {
+        const objectName = toSafeObjectName(rootDir, source);
+        const outputObject = resolve(targetBuildDir, `${objectName}.o`);
+        const args = [
+          '-c',
+          source,
+          '-o',
+          outputObject,
+          ...resolvedOptions,
+          ...includeArgs,
+          ...defineArgs,
+        ];
+        logger.debug(`emcc ${args.join(' ')}`);
+        await runCommandWithEnv(
+          emccCommand,
+          args,
+          rootDir,
+          buildEnv,
+          emsdkOptions.signal
+        );
+        return outputObject;
+      };
+      const buildObjectsSequential = async () => {
+        const objectFiles: string[] = [];
+        for (const source of sources) {
+          objectFiles.push(await compileSource(source));
+        }
+        return objectFiles;
+      };
+      const objectFiles = parallel
+        ? await Promise.all(sources.map((source) => compileSource(source)))
+        : await buildObjectsSequential();
+
+      logger.info(`Linking target: ${targetName}`);
+      const linkArgs = [
+        ...objectFiles,
+        '-o',
+        resolvedOutFile,
+        ...resolvedLinkOptions,
+        ...exportArgs,
+      ];
+      logger.debug(`emcc ${linkArgs.join(' ')}`);
       await runCommandWithEnv(
         emccCommand,
-        args,
+        linkArgs,
         rootDir,
-        createEnvForBuild(targetEnv, {}),
+        buildEnv,
         emsdkOptions.signal
       );
-      objectFiles.push(outputObject);
+
+      outFiles[targetName] = resolvedOutFile;
     }
-
-    logger.info(`Linking target: ${targetName}`);
-    const linkArgs = [
-      ...objectFiles,
-      '-o',
-      resolvedOutFile,
-      ...resolvedLinkOptions,
-      ...exportArgs,
-    ];
-    logger.debug(`emcc ${linkArgs.join(' ')}`);
-    await runCommandWithEnv(
-      emccCommand,
-      linkArgs,
-      rootDir,
-      createEnvForBuild(targetEnv, {}),
-      emsdkOptions.signal
-    );
-
-    outFiles[targetName] = resolvedOutFile;
+  } finally {
+    if (cleanupBuildDir) {
+      await rm(buildRunDir, { recursive: true, force: true });
+    }
   }
 
   return {
