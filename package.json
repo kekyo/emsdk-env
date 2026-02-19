@@ -34,7 +34,8 @@
   },
   "files": [
     "dist",
-    "LICENSE"
+    "LICENSE",
+    "./images/emsdk-env-120.png"
   ],
   "scripts": {
     "build": "vite build && (cd demo; npm run build)",

@@ -9,12 +9,10 @@ import emsdkEnv from 'emsdk-env/vite';
 export default defineConfig({
   plugins: [
     emsdkEnv({
-      common: {
-        options: ['-O3', '-std=c99'],
-        linkOptions: ['-s', 'STANDALONE_WASM=1', '--no-entry'],
-      },
       targets: {
         add: {
+          options: ['-O3', '-std=c99'],
+          linkOptions: ['-s', 'STANDALONE_WASM=1', '--no-entry'],
           exports: ['_add'],
         },
       },

@@ -2,6 +2,8 @@
 
 Emscripten SDKを使用して、WASM C/C++ソースコードの自動ビルドを実行するViteプラグイン
 
+![emsdk-env](./images/emsdk-env-120.png)
+
 [![Project Status: WIP – Initial development is in progress, but there has not yet been a stable, usable release suitable for the public.](https://www.repostatus.org/badges/latest/wip.svg)](https://www.repostatus.org/#wip)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![npm version](https://img.shields.io/npm/v/emsdk-env.svg)](https://www.npmjs.com/package/emsdk-env)
@@ -30,15 +32,14 @@ export default defineConfig({
   plugins: [
     // プラグインとして追加
     emsdkEnv({
-      // 共通のビルドオプション
-      common: {
-        options: ['-O3', '-std=c99'],
-        linkOptions: ['-s', 'STANDALONE_WASM=1', '--no-entry'],
-      },
       // ビルドターゲット
       targets: {
         // "add.wasm"を生成
         add: {
+          // コンパイルオプション
+          options: ['-O3', '-std=c99'],
+          // リンクオプション
+          linkOptions: ['-s', 'STANDALONE_WASM=1', '--no-entry'],
           // エクスポートシンボル
           exports: ['_add'],
         },
@@ -96,6 +97,32 @@ project/
   `buildDir` をプロジェクト配下に変更した場合は、そのパスを `.gitignore` に含めることを推奨します。
 
 もちろん、これらは変更することが出来ます。Viteプラグインの引数に指定します。
+
+ビルドされたバイナリが`src/wasm/`に配置される事に違和感を感じるかもしれませんが、これはViteサーバーがデフォルトでWASMバイナリに容易にアクセスできるパスだからです。
+このように配置されたWASMバイナリは、以下のようなボイラープレートコードで呼び出し可能になります:
+
+```typescript
+// WASMバイナリを読み込む
+const wasmUrl = new URL('./wasm/add.wasm', import.meta.url);
+const response = await fetch(wasmUrl);
+const wasmBuffer = await response.arrayBuffer();
+
+// WASMランタイムで実体化させる
+const { instance } = await WebAssembly.instantiate(wasmBuffer, {});
+
+// WASMバイナリ内の公開された関数エンドポイントを取得する
+const exports = instance.exports as {
+  add?: (a: number, b: number) => number;
+  _add?: (a: number, b: number) => number;
+};
+const add = exports.add ?? exports._add;
+if (typeof add !== 'function') {
+  throw new Error('add function not found in wasm exports.');
+}
+
+// 関数を呼び出す
+const result = add(1, 2);
+```
 
 TODO:
 

@@ -2,6 +2,8 @@
 
 A Vite plugin that automatically builds WASM C/C++ source code using the Emscripten SDK.
 
+![emsdk-env](./images/emsdk-env-120.png)
+
 [![Project Status: WIP – Initial development is in progress, but there has not yet been a stable, usable release suitable for the public.](https://www.repostatus.org/badges/latest/wip.svg)](https://www.repostatus.org/#wip)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -27,15 +29,14 @@ export default defineConfig({
   plugins: [
     // Add as a plugin
     emsdkEnv({
-      // Common build options
-      common: {
-        options: ['-O3', '-std=c99'],
-        linkOptions: ['-s', 'STANDALONE_WASM=1', '--no-entry'],
-      },
       // Build targets
       targets: {
         // Generate "add.wasm"
         add: {
+          // Compiler options
+          options: ['-O3', '-std=c99'],
+          // Linker options
+          linkOptions: ['-s', 'STANDALONE_WASM=1', '--no-entry'],
           // Exported symbols
           exports: ['_add'],
         },

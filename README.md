@@ -2,6 +2,8 @@
 
 A Vite plugin that automatically builds WASM C/C++ source code using the Emscripten SDK.
 
+![emsdk-env](./images/emsdk-env-120.png)
+
 [![Project Status: WIP – Initial development is in progress, but there has not yet been a stable, usable release suitable for the public.](https://www.repostatus.org/badges/latest/wip.svg)](https://www.repostatus.org/#wip)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![npm version](https://img.shields.io/npm/v/emsdk-env.svg)](https://www.npmjs.com/package/emsdk-env)
@@ -30,15 +32,14 @@ export default defineConfig({
   plugins: [
     // Add as a plugin
     emsdkEnv({
-      // Common build options
-      common: {
-        options: ['-O3', '-std=c99'],
-        linkOptions: ['-s', 'STANDALONE_WASM=1', '--no-entry'],
-      },
       // Build targets
       targets: {
         // Generate "add.wasm"
         add: {
+          // Compiler options
+          options: ['-O3', '-std=c99'],
+          // Linker options
+          linkOptions: ['-s', 'STANDALONE_WASM=1', '--no-entry'],
           // Exported symbols
           exports: ['_add'],
         },
@@ -96,6 +97,32 @@ project/
   If you override `buildDir` to point inside the project, add it to `.gitignore`.
 
 Of course, you can change these. Specify them in the Vite plugin options.
+
+You might find it odd that the built binary is placed in `src/wasm/`, but this is because the Vite server defaults to a path where it can easily access WASM binaries.
+A WASM binary placed here can be called using boilerplate code like the following:
+
+```typescript
+// Load WASM binary
+const wasmUrl = new URL('./wasm/add.wasm', import.meta.url);
+const response = await fetch(wasmUrl);
+const wasmBuffer = await response.arrayBuffer();
+
+// Instantate with the WASM runtime
+const { instance } = await WebAssembly.instantiate(wasmBuffer, {});
+
+// Retrieve exposed function endpoints within a WASM binary
+const exports = instance.exports as {
+  add?: (a: number, b: number) => number;
+  _add?: (a: number, b: number) => number;
+};
+const add = exports.add ?? exports._add;
+if (typeof add !== 'function') {
+  throw new Error('add function not found in wasm exports.');
+}
+
+// Invoke WASM function
+const result = add(1, 2);
+```
 
 TODO:
 
