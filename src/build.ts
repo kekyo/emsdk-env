@@ -99,6 +99,13 @@ const resolveSourcePatterns = (
 const buildDefineFlags = (defines: Record<string, DefineValue>) =>
   Object.entries(defines).map(([key, value]) => `-D${key}=${String(value)}`);
 
+const buildExportFlags = (exports: string[]) => {
+  if (exports.length === 0) {
+    return [];
+  }
+  return ['-s', `EXPORTED_FUNCTIONS=${JSON.stringify(exports)}`];
+};
+
 const createEnvForBuild = (
   baseEnv: Record<string, string>,
   overrides: Record<string, string>
@@ -219,6 +226,10 @@ export const buildWasm = async (
       ...ensureArray(common.linkOptions),
       ...ensureArray(target.linkOptions),
     ];
+    const mergedExports = [
+      ...ensureArray(common.exports),
+      ...ensureArray(target.exports),
+    ];
     const mergedIncludeDirs = [
       ...ensureArray(common.includeDirs),
       ...ensureArray(target.includeDirs),
@@ -257,6 +268,8 @@ export const buildWasm = async (
       targetEnv,
       'linkOptions'
     );
+    const resolvedExports = expandArray(mergedExports, targetEnv, 'exports');
+    const exportArgs = buildExportFlags(resolvedExports);
     const includeArgs = resolveIncludeDirs(
       mergedIncludeDirs,
       targetEnv,
@@ -297,6 +310,7 @@ export const buildWasm = async (
       '-o',
       resolvedOutFile,
       ...resolvedLinkOptions,
+      ...exportArgs,
     ];
     logger.debug(`emcc ${linkArgs.join(' ')}`);
     await runCommandWithEnv(

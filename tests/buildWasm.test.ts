@@ -189,6 +189,7 @@ describe('buildWasm', () => {
               _DEBUG: true,
               SIMD_ENABLED: '0',
             },
+            exports: ['_common'],
           },
           targets: {
             target1: {
@@ -196,6 +197,7 @@ describe('buildWasm', () => {
               sources: ['{SRC_DIR}/alpha.c'],
               options: ['-O3'],
               linkOptions: ['-s', 'ALLOW_MEMORY_GROWTH=1'],
+              exports: ['_target1'],
               includeDirs: ['include'],
               defines: {
                 SIMD_ENABLED: '1',
@@ -257,6 +259,26 @@ describe('buildWasm', () => {
       for (const call of target2CompileCalls) {
         expect(call).toContain('-DSIMD_ENABLED=0');
       }
+
+      const target1Link = calls.find(
+        (args) => args.includes(target1Out) && !args.includes('-c')
+      );
+      expect(target1Link).toBeTruthy();
+      if (!target1Link) {
+        throw new Error('Missing link call for target1.');
+      }
+      expect(target1Link).toContain(
+        'EXPORTED_FUNCTIONS=["_common","_target1"]'
+      );
+
+      const target2Link = calls.find(
+        (args) => args.includes(target2Out) && !args.includes('-c')
+      );
+      expect(target2Link).toBeTruthy();
+      if (!target2Link) {
+        throw new Error('Missing link call for target2.');
+      }
+      expect(target2Link).toContain('EXPORTED_FUNCTIONS=["_common"]');
     } finally {
       await mockRepo.cleanup();
       await rm(cacheDir, { recursive: true, force: true });

@@ -44,6 +44,7 @@ export type DefineValue = string | number | boolean;
 export interface WasmBuildCommonOptions {
   options?: string[];
   linkOptions?: string[];
+  exports?: string[];
   includeDirs?: string[];
   defines?: Record<string, DefineValue>;
 }
@@ -53,6 +54,7 @@ export interface WasmBuildTarget {
   sources?: string[];
   options?: string[];
   linkOptions?: string[];
+  exports?: string[];
   includeDirs?: string[];
   defines?: Record<string, DefineValue>;
 }
