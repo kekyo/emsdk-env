@@ -5,11 +5,10 @@
 
 import { execFileSync } from 'child_process';
 import { existsSync } from 'fs';
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'fs/promises';
+import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-
 import { describe, expect, test } from 'vitest';
 
 import { prepareEmsdk } from '../src/index';
@@ -52,6 +51,10 @@ case "\${command}" in
     if [ -z "\${target}" ]; then
       echo "install requires a target version" >&2
       exit 2
+    fi
+    printf '%s\n' "\${PWD}" > ".install-start"
+    if [ -n "\${EMSDK_ENV_TEST_INSTALL_DELAY:-}" ]; then
+      sleep "\${EMSDK_ENV_TEST_INSTALL_DELAY}"
     fi
     mkdir -p "upstream/emscripten"
     cat > "upstream/emscripten/emcc" <<'EMCC'
@@ -124,6 +127,31 @@ const readRequiredFile = async (targetPath: string) => {
   return (await readFile(targetPath, 'utf8')).trim();
 };
 
+const waitForInstallStart = async (cacheDir: string) => {
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    let entries: string[] = [];
+    try {
+      entries = await readdir(cacheDir);
+    } catch {
+      entries = [];
+    }
+    for (const entry of entries) {
+      if (!entry.startsWith('.tmp-')) {
+        continue;
+      }
+      const installStartPath = join(cacheDir, entry, 'emsdk', '.install-start');
+      if (existsSync(installStartPath)) {
+        return join(cacheDir, entry);
+      }
+    }
+    await new Promise((resolvePromise) => {
+      setTimeout(resolvePromise, 25);
+    });
+  }
+  throw new Error('Timed out waiting for install start.');
+};
+
 describe.sequential('prepareEmsdk', () => {
   test('clones, installs, activates, and returns final path', async () => {
     const mockRepo = await createMockRepo();
@@ -161,6 +189,34 @@ describe.sequential('prepareEmsdk', () => {
       expect(
         existsSync(join(expectedDir, 'upstream', 'emscripten', 'emcc'))
       ).toBe(true);
+    } finally {
+      await mockRepo.cleanup();
+      await rm(cacheDir, { recursive: true, force: true });
+    }
+  });
+
+  test('defaults to latest when targetVersion is omitted', async () => {
+    const mockRepo = await createMockRepo();
+    const cacheDir = await mkdtemp(join(workspaceRoot, '.test-cache-'));
+    try {
+      const result = await prepareEmsdk({
+        cacheDir,
+        repoUrl: mockRepo.repoUrl,
+      });
+
+      const expectedDir = resolve(cacheDir, 'latest');
+      expect(result).toBe(expectedDir);
+      expect(existsSync(expectedDir)).toBe(true);
+
+      const installVersion = await readRequiredFile(
+        join(expectedDir, '.install-version')
+      );
+      const activateVersion = await readRequiredFile(
+        join(expectedDir, '.activate-version')
+      );
+
+      expect(installVersion).toBe('latest');
+      expect(activateVersion).toBe('latest');
     } finally {
       await mockRepo.cleanup();
       await rm(cacheDir, { recursive: true, force: true });
@@ -234,6 +290,46 @@ describe.sequential('prepareEmsdk', () => {
         delete process.env.EMSDK_ENV_TEST_DELAY;
       } else {
         process.env.EMSDK_ENV_TEST_DELAY = originalDelay;
+      }
+      await mockRepo.cleanup();
+      await rm(cacheDir, { recursive: true, force: true });
+    }
+  });
+
+  test('aborts during install and cleans temporary directories', async () => {
+    const mockRepo = await createMockRepo();
+    const cacheDir = await mkdtemp(join(workspaceRoot, '.test-cache-'));
+    const controller = new AbortController();
+    const originalDelay = process.env.EMSDK_ENV_TEST_INSTALL_DELAY;
+    let preparePromise: Promise<string> | undefined;
+    try {
+      process.env.EMSDK_ENV_TEST_INSTALL_DELAY = '1';
+      const targetVersion = 'abort-version';
+      preparePromise = prepareEmsdk({
+        targetVersion,
+        cacheDir,
+        repoUrl: mockRepo.repoUrl,
+        signal: controller.signal,
+      });
+
+      await waitForInstallStart(cacheDir);
+      controller.abort();
+
+      await expect(preparePromise).rejects.toMatchObject({
+        name: 'AbortError',
+      });
+
+      const entries = await readdir(cacheDir);
+      expect(entries.some((entry) => entry.startsWith('.tmp-'))).toBe(false);
+      expect(existsSync(resolve(cacheDir, targetVersion))).toBe(false);
+    } finally {
+      if (preparePromise) {
+        await Promise.allSettled([preparePromise]);
+      }
+      if (originalDelay === undefined) {
+        delete process.env.EMSDK_ENV_TEST_INSTALL_DELAY;
+      } else {
+        process.env.EMSDK_ENV_TEST_INSTALL_DELAY = originalDelay;
       }
       await mockRepo.cleanup();
       await rm(cacheDir, { recursive: true, force: true });

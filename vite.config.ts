@@ -44,6 +44,7 @@ export default defineConfig({
         'child_process',
         'fs',
         'fs/promises',
+        'glob',
         'os',
         'path',
         'url',

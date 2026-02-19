@@ -1,0 +1,15 @@
+{
+  "name": "emsdk-env-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite dev"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": ">=5.0.0",
+    "vite": ">=5.0.0",
+    "emsdk-env": "file:.."
+  }
+}
