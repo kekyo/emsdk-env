@@ -51,7 +51,7 @@ const createBuildId = () => {
   return `${timestamp}_${seq}_${process.pid}`;
 };
 
-const ensureArray = (value?: string[]) => (value ? [...value] : []);
+const ensureArray = (value?: readonly string[]) => value ?? [];
 
 const normalizePrepareOptions = (
   options: PrepareEmsdkOptions | undefined
@@ -88,7 +88,7 @@ const expandPlaceholders = (
   });
 
 const expandArray = (
-  values: string[],
+  values: readonly string[],
   env: Record<string, string>,
   label: string
 ) => values.map((value) => expandPlaceholders(value, env, label));
@@ -109,7 +109,7 @@ const resolveDefines = (
 };
 
 const resolveIncludeDirs = (
-  includeDirs: string[],
+  includeDirs: readonly string[],
   env: Record<string, string>,
   rootDir: string
 ) => {
@@ -127,7 +127,7 @@ const resolveOutFile = (
 };
 
 const resolveSourcesFromPatterns = async (
-  patterns: string[],
+  patterns: readonly string[],
   env: Record<string, string>,
   srcDir: string,
   label: string
@@ -145,7 +145,7 @@ const resolveSourcesFromPatterns = async (
 const buildDefineFlags = (defines: Record<string, DefineValue>) =>
   Object.entries(defines).map(([key, value]) => `-D${key}=${String(value)}`);
 
-const buildExportFlags = (exports: string[]) => {
+const buildExportFlags = (exports: readonly string[]) => {
   if (exports.length === 0) {
     return [];
   }
@@ -174,7 +174,7 @@ const resolveTargetOutFile = (
 };
 
 const resolveTargetSources = async (
-  targetSources: string[] | undefined,
+  targetSources: readonly string[] | undefined,
   env: Record<string, string>,
   srcDir: string
 ) => {
@@ -213,14 +213,14 @@ const dedupeSources = (sources: string[]) => {
 };
 
 type CompileArgs = {
-  resolvedOptions: string[];
-  includeArgs: string[];
-  defineArgs: string[];
+  resolvedOptions: readonly string[];
+  includeArgs: readonly string[];
+  defineArgs: readonly string[];
 };
 
 const buildCompileArgs = (
-  options: string[],
-  includeDirs: string[],
+  options: readonly string[],
+  includeDirs: readonly string[],
   defines: Record<string, DefineValue>,
   env: Record<string, string>,
   rootDir: string

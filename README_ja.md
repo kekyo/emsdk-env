@@ -213,7 +213,7 @@ export default defineConfig({
         // "add.wasm" のビルド
         add: {
           options: ['-O3', '-std=c99'],
-          defines: {'OPERATOR': 'ADD'},
+          defines: { OPERATOR: 'ADD' },
 
           //  :
           //  :
@@ -221,7 +221,7 @@ export default defineConfig({
         // "mul.wasm" のビルド
         mul: {
           options: ['-O3', '-std=c99'],
-          defines: {'OPERATOR': 'MUL'},
+          defines: { OPERATOR: 'MUL' },
 
           //  :
           //  :
@@ -245,14 +245,14 @@ export default defineConfig({
       targets: {
         // "add.wasm" のビルド
         add: {
-          defines: {'OPERATOR': 'ADD'},
+          defines: { OPERATOR: 'ADD' },
 
           //  :
           //  :
         },
         // "mul.wasm" のビルド
         mul: {
-          defines: {'OPERATOR': 'MUL'},
+          defines: { OPERATOR: 'MUL' },
 
           //  :
           //  :
