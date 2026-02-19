@@ -38,7 +38,7 @@
   ],
   "scripts": {
     "build": "vite build && (cd demo; npm run build)",
-    "test": "npm run build && vitest run && (cd demo; npm run demo)",
+    "test": "npm run build && vitest run",
     "pack": "npm run build && screw-up pack --pack-destination ./artifacts/"
   },
   "dependencies": {

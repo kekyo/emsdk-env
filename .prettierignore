@@ -50,3 +50,5 @@ temp/
 # Generated files
 *.generated.*
 generated/
+
+test_results/
