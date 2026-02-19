@@ -15,7 +15,7 @@ const createAbortError = () => {
 
 export const runCommand = async (
   command: string,
-  args: string[],
+  args: readonly string[],
   cwd: string,
   signal: AbortSignal | undefined
 ) => {
@@ -67,7 +67,7 @@ export const runCommand = async (
 
 export const runCommandWithEnv = async (
   command: string,
-  args: string[],
+  args: readonly string[],
   cwd: string,
   env: NodeJS.ProcessEnv,
   signal: AbortSignal | undefined
@@ -121,7 +121,7 @@ export const runCommandWithEnv = async (
 
 export const runCommandCapture = async (
   command: string,
-  args: string[],
+  args: readonly string[],
   cwd: string,
   signal: AbortSignal | undefined
 ) => {

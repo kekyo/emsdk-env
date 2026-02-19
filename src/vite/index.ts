@@ -34,13 +34,13 @@ const expandPlaceholders = (
   });
 
 const expandArray = (
-  values: string[],
+  values: readonly string[],
   env: Record<string, string>,
   label: string
 ) => values.map((value) => expandPlaceholders(value, env, label));
 
 const resolveIncludeDirs = (
-  includeDirs: string[],
+  includeDirs: readonly string[],
   env: Record<string, string>,
   rootDir: string
 ) => {
@@ -101,7 +101,7 @@ const resolveWatchTargets = (
   baseDirs.add(srcDir);
 
   const addIncludePatterns = (
-    targetIncludeDirs: string[] | undefined,
+    targetIncludeDirs: readonly string[] | undefined,
     targetName: string | undefined
   ) => {
     if (!targetIncludeDirs || targetIncludeDirs.length === 0) {
@@ -195,6 +195,15 @@ const setupDevServer = async (
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
+/**
+ * Vite plugin that builds C/C++ sources into WASM using the Emscripten SDK.
+ *
+ * In dev (`vite serve`), it watches source/include directories and rebuilds on
+ * changes. In build (`vite build`), it performs a one-shot build before bundling.
+ *
+ * @param options - Plugin options including build rules.
+ * @returns Vite plugin instance.
+ */
 const emsdkEnv = (options: EmsdkVitePluginOptions): Plugin => {
   let resolvedConfig: ResolvedConfig | undefined;
   return {
