@@ -126,13 +126,20 @@ const resolveOutFile = (
   return resolvePath(outDir, expanded);
 };
 
-const resolveSourcePatterns = (
+const resolveSourcesFromPatterns = async (
   patterns: string[],
   env: Record<string, string>,
-  srcDir: string
+  srcDir: string,
+  label: string
 ) => {
-  const expanded = expandArray(patterns, env, 'sources');
-  return expanded.map((value) => resolvePath(srcDir, value));
+  const expanded = expandArray(patterns, env, label);
+  const resolvedPatterns = expanded.map((value) => resolvePath(srcDir, value));
+  const results = await Promise.all(
+    resolvedPatterns.map((pattern) => glob(pattern, { nodir: true }))
+  );
+  const sources = results.flat();
+  sources.sort();
+  return sources;
 };
 
 const buildDefineFlags = (defines: Record<string, DefineValue>) =>
@@ -175,19 +182,56 @@ const resolveTargetSources = async (
     targetSources && targetSources.length > 0
       ? targetSources
       : [join(srcDir, '**', '*.c'), join(srcDir, '**', '*.cpp')];
-  const resolvedPatterns = resolveSourcePatterns(patterns, env, srcDir);
-  const results = await Promise.all(
-    resolvedPatterns.map((pattern) => glob(pattern, { nodir: true }))
-  );
-  const sources = results.flat();
-  sources.sort();
-  return sources;
+  return resolveSourcesFromPatterns(patterns, env, srcDir, 'sources');
 };
 
-const toSafeObjectName = (rootDir: string, sourcePath: string) =>
-  relative(rootDir, sourcePath)
+const toSafeObjectName = (
+  rootDir: string,
+  sourcePath: string,
+  groupIndex?: number
+) => {
+  const baseName = relative(rootDir, sourcePath)
     .replace(/[\\/]/g, '_')
     .replace(/[^A-Za-z0-9._-]/g, '_');
+  if (groupIndex === undefined) {
+    return baseName;
+  }
+  return `${baseName}__g${groupIndex}`;
+};
+
+const dedupeSources = (sources: string[]) => {
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const source of sources) {
+    if (seen.has(source)) {
+      continue;
+    }
+    seen.add(source);
+    deduped.push(source);
+  }
+  return deduped;
+};
+
+type CompileArgs = {
+  resolvedOptions: string[];
+  includeArgs: string[];
+  defineArgs: string[];
+};
+
+const buildCompileArgs = (
+  options: string[],
+  includeDirs: string[],
+  defines: Record<string, DefineValue>,
+  env: Record<string, string>,
+  rootDir: string
+): CompileArgs => {
+  const resolvedOptions = expandArray(options, env, 'options');
+  const includeArgs = resolveIncludeDirs(includeDirs, env, rootDir).map(
+    (dir) => `-I${dir}`
+  );
+  const defineArgs = buildDefineFlags(resolveDefines(defines, env));
+  return { resolvedOptions, includeArgs, defineArgs };
+};
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -261,10 +305,6 @@ export const buildWasm = async (
 
   try {
     for (const [targetName, target] of targets) {
-      const mergedOptions = [
-        ...ensureArray(common.options),
-        ...ensureArray(target.options),
-      ];
       const mergedLinkOptions = [
         ...ensureArray(common.linkOptions),
         ...ensureArray(target.linkOptions),
@@ -273,11 +313,16 @@ export const buildWasm = async (
         ...ensureArray(common.exports),
         ...ensureArray(target.exports),
       ];
-      const mergedIncludeDirs = [
+      const baseCompileOptions = [
+        ...ensureArray(common.options),
+        ...ensureArray(target.options),
+      ];
+      const baseIncludeDirs = [
         ...ensureArray(common.includeDirs),
         ...ensureArray(target.includeDirs),
       ];
-      const mergedDefines = mergeDefines(common.defines, target.defines);
+      const baseDefines = mergeDefines(common.defines, target.defines);
+      const sourceGroups = target.sourceGroups ?? [];
 
       const targetEnv = {
         ...envWithDirs,
@@ -297,7 +342,30 @@ export const buildWasm = async (
         targetEnv,
         srcDir
       );
-      if (sources.length === 0) {
+      const groupSources: string[][] = sourceGroups.map(() => []);
+      const groupSourceSet = new Set<string>();
+      for (let index = 0; index < sourceGroups.length; index += 1) {
+        const group = sourceGroups[index];
+        if (!group) {
+          continue;
+        }
+        const resolved = await resolveSourcesFromPatterns(
+          group.sources,
+          targetEnv,
+          srcDir,
+          `sourceGroups[${index}].sources`
+        );
+        const deduped = dedupeSources(resolved);
+        groupSources[index] = deduped;
+        for (const source of deduped) {
+          groupSourceSet.add(source);
+        }
+      }
+      const baseSources = sources.filter(
+        (source) => !groupSourceSet.has(source)
+      );
+      const groupedSources = groupSources.flat();
+      if (baseSources.length + groupedSources.length === 0) {
         throw new Error(`No sources matched for target: ${targetName}`);
       }
 
@@ -305,7 +373,6 @@ export const buildWasm = async (
       await rm(targetBuildDir, { recursive: true, force: true });
       await ensureDirectory(targetBuildDir);
 
-      const resolvedOptions = expandArray(mergedOptions, targetEnv, 'options');
       const resolvedLinkOptions = expandArray(
         mergedLinkOptions,
         targetEnv,
@@ -313,32 +380,53 @@ export const buildWasm = async (
       );
       const resolvedExports = expandArray(mergedExports, targetEnv, 'exports');
       const exportArgs = buildExportFlags(resolvedExports);
-      const includeArgs = resolveIncludeDirs(
-        mergedIncludeDirs,
+      const baseCompileArgs = buildCompileArgs(
+        baseCompileOptions,
+        baseIncludeDirs,
+        baseDefines,
         targetEnv,
         rootDir
-      ).map((dir) => `-I${dir}`);
-      const defineArgs = buildDefineFlags(
-        resolveDefines(mergedDefines, targetEnv)
       );
+      const groupCompileArgs = sourceGroups.map((group) => {
+        const groupOptions = [
+          ...baseCompileOptions,
+          ...ensureArray(group?.options),
+        ];
+        const groupIncludeDirs = [
+          ...baseIncludeDirs,
+          ...ensureArray(group?.includeDirs),
+        ];
+        const groupDefines = mergeDefines(baseDefines, group?.defines ?? {});
+        return buildCompileArgs(
+          groupOptions,
+          groupIncludeDirs,
+          groupDefines,
+          targetEnv,
+          rootDir
+        );
+      });
 
       logger.info(`Compiling target: ${targetName}`);
-      const compileSource = async (source: string) => {
-        const objectName = toSafeObjectName(rootDir, source);
+      const compileSource = async (
+        source: string,
+        args: CompileArgs,
+        groupIndex: number | undefined
+      ) => {
+        const objectName = toSafeObjectName(rootDir, source, groupIndex);
         const outputObject = resolve(targetBuildDir, `${objectName}.o`);
-        const args = [
+        const compileArgs = [
           '-c',
           source,
           '-o',
           outputObject,
-          ...resolvedOptions,
-          ...includeArgs,
-          ...defineArgs,
+          ...args.resolvedOptions,
+          ...args.includeArgs,
+          ...args.defineArgs,
         ];
-        logger.debug(`emcc ${args.join(' ')}`);
+        logger.debug(`emcc ${compileArgs.join(' ')}`);
         await runCommandWithEnv(
           emccCommand,
-          args,
+          compileArgs,
           rootDir,
           buildEnv,
           emsdkOptions.signal
@@ -347,13 +435,57 @@ export const buildWasm = async (
       };
       const buildObjectsSequential = async () => {
         const objectFiles: string[] = [];
-        for (const source of sources) {
-          objectFiles.push(await compileSource(source));
+        for (const source of baseSources) {
+          objectFiles.push(
+            await compileSource(source, baseCompileArgs, undefined)
+          );
+        }
+        for (let index = 0; index < groupSources.length; index += 1) {
+          const sourcesInGroup = groupSources[index];
+          if (!sourcesInGroup) {
+            continue;
+          }
+          const groupArgs = groupCompileArgs[index];
+          if (!groupArgs) {
+            continue;
+          }
+          for (const source of sourcesInGroup) {
+            objectFiles.push(await compileSource(source, groupArgs, index));
+          }
         }
         return objectFiles;
       };
+      const compileJobs: Array<{
+        source: string;
+        args: CompileArgs;
+        groupIndex: number | undefined;
+      }> = [];
+      for (const source of baseSources) {
+        compileJobs.push({
+          source,
+          args: baseCompileArgs,
+          groupIndex: undefined,
+        });
+      }
+      for (let index = 0; index < groupSources.length; index += 1) {
+        const sourcesInGroup = groupSources[index];
+        if (!sourcesInGroup) {
+          continue;
+        }
+        const groupArgs = groupCompileArgs[index];
+        if (!groupArgs) {
+          continue;
+        }
+        for (const source of sourcesInGroup) {
+          compileJobs.push({ source, args: groupArgs, groupIndex: index });
+        }
+      }
       const objectFiles = parallel
-        ? await Promise.all(sources.map((source) => compileSource(source)))
+        ? await Promise.all(
+            compileJobs.map((job) =>
+              compileSource(job.source, job.args, job.groupIndex)
+            )
+          )
         : await buildObjectsSequential();
 
       logger.info(`Linking target: ${targetName}`);

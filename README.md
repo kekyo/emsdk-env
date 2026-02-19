@@ -124,6 +124,143 @@ if (typeof add !== 'function') {
 const result = add(1, 2);
 ```
 
+### Specifying Source Files
+
+By default, files matching `wasm/**/*.c` and `wasm/**/*.cpp` are treated as source files and built.
+The leading `wasm/` directory is the "source root directory", and any source file under it becomes a compile target.
+
+To change this, explicitly set `srcDir` and/or `sources`:
+
+```typescript
+export default defineConfig({
+  plugins: [
+    emsdkEnv({
+      // Explicitly set the source root directory
+      srcDir: 'wasm',
+      targets: {
+        add: {
+          // Explicitly specify source file patterns
+          sources: ['**/*.c++', '**/*.cpp'],
+
+          //  :
+          //  :
+        },
+      },
+    }),
+  ],
+});
+```
+
+- `srcDir` is also used as the root directory that the Vite plugin watches for source changes. Files outside `srcDir` will not trigger rebuilds during the Vite dev server.
+
+### Source Groups
+
+Building a single WASM binary may require compiling different sources with different options.
+In that case, use "source groups" to split source files into groups:
+
+```typescript
+export default defineConfig({
+  plugins: [
+    emsdkEnv({
+      targets: {
+        add: {
+          // Compile options (common)
+          options: ['-O3', '-std=c99'],
+          // Define source groups
+          sourceGroups: [
+            {
+              sources: ['opt/**/*.c'],
+              defines: { OPT: 1 }, // -DOPT=1
+            },
+            {
+              sources: ['opt/**/*.c'],
+              defines: { OPT: 2 }, // -DOPT=2
+            },
+          ],
+
+          //  :
+          //  :
+        },
+      },
+    }),
+  ],
+});
+```
+
+In the above case, compilation runs as follows:
+
+- Sources under `opt/` are compiled with `OPT=1`.
+- Sources under `opt/` are compiled with `OPT=2`.
+- All other sources are compiled without additional defines. (Sources under `wasm/` are still targets, except those covered above.)
+
+All of these object files are linked together to produce `add.wasm`.
+Therefore, take care to avoid symbol collisions for sources under `opt/`.
+
+If you compile unrelated source sets with different options, there is no problem.
+
+### Building Multiple WASM Binaries
+
+You may want to generate multiple WASM binaries in a single project.
+In that case, add multiple entries under `targets`:
+
+```typescript
+export default defineConfig({
+  plugins: [
+    emsdkEnv({
+      targets: {
+        // Build "add.wasm"
+        add: {
+          options: ['-O3', '-std=c99'],
+          defines: { OPERATOR: 'ADD' },
+
+          //  :
+          //  :
+        },
+        // Build "mul.wasm"
+        mul: {
+          options: ['-O3', '-std=c99'],
+          defines: { OPERATOR: 'MUL' },
+
+          //  :
+          //  :
+        },
+      },
+    }),
+  ],
+});
+```
+
+You can split `targets` as above, but when the same options repeat, use `common` to share them:
+
+```typescript
+export default defineConfig({
+  plugins: [
+    emsdkEnv({
+      common: {
+        // Common compile options
+        options: ['-O3', '-std=c99'],
+      },
+      targets: {
+        // Build "add.wasm"
+        add: {
+          defines: { OPERATOR: 'ADD' },
+
+          //  :
+          //  :
+        },
+        // Build "mul.wasm"
+        mul: {
+          defines: { OPERATOR: 'MUL' },
+
+          //  :
+          //  :
+        },
+      },
+    }),
+  ],
+});
+```
+
 TODO:
 
 ---

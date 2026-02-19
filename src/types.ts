@@ -52,9 +52,17 @@ export interface WasmBuildCommonOptions {
 export interface WasmBuildTarget {
   outFile?: string;
   sources?: string[];
+  sourceGroups?: WasmBuildSourceGroup[];
   options?: string[];
   linkOptions?: string[];
   exports?: string[];
+  includeDirs?: string[];
+  defines?: Record<string, DefineValue>;
+}
+
+export interface WasmBuildSourceGroup {
+  sources: string[];
+  options?: string[];
   includeDirs?: string[];
   defines?: Record<string, DefineValue>;
 }

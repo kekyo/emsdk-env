@@ -9,6 +9,7 @@ import { dirname, join, resolve } from 'path';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { buildWasm } from '../src/build';
+import { runCommandWithEnv } from '../src/commands';
 import { prepareEmsdk } from '../src/emsdk';
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -194,6 +195,146 @@ describe('buildWasm options', () => {
       });
 
       expect(maxCompileConcurrency).toBe(1);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('applies sourceGroups compile options and overrides base sources', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
+    const wasmDir = join(projectRoot, 'wasm');
+    await mkdir(wasmDir, { recursive: true });
+    await writeFile(join(wasmDir, 'alpha.c'), 'int alpha() { return 1; }');
+    await writeFile(join(wasmDir, 'beta.c'), 'int beta() { return 2; }');
+    await writeFile(join(wasmDir, 'gamma.c'), 'int gamma() { return 3; }');
+
+    const runCommandMock = vi.mocked(runCommandWithEnv);
+    runCommandMock.mockClear();
+
+    try {
+      await buildWasm({
+        root: projectRoot,
+        buildDir: join(projectRoot, '.wasm-build'),
+        rule: {
+          common: {
+            options: ['-O1'],
+          },
+          targets: {
+            app: {
+              sources: ['alpha.c', 'beta.c'],
+              options: ['-O2'],
+              sourceGroups: [
+                {
+                  sources: ['beta.c', 'gamma.c'],
+                  options: ['-O3'],
+                  defines: {
+                    GROUP: 1,
+                  },
+                },
+              ],
+            },
+          },
+        },
+      });
+
+      const compileCalls = runCommandMock.mock.calls.filter((call) => {
+        const args = call[1] as string[] | undefined;
+        return Array.isArray(args) && args.includes('-c');
+      });
+
+      const alphaPath = resolve(projectRoot, 'wasm', 'alpha.c');
+      const betaPath = resolve(projectRoot, 'wasm', 'beta.c');
+      const gammaPath = resolve(projectRoot, 'wasm', 'gamma.c');
+
+      const alphaCalls = compileCalls.filter((call) =>
+        (call[1] as string[]).includes(alphaPath)
+      );
+      const betaCalls = compileCalls.filter((call) =>
+        (call[1] as string[]).includes(betaPath)
+      );
+      const gammaCalls = compileCalls.filter((call) =>
+        (call[1] as string[]).includes(gammaPath)
+      );
+
+      expect(alphaCalls.length).toBe(1);
+      expect(betaCalls.length).toBe(1);
+      expect(gammaCalls.length).toBe(1);
+
+      const alphaArgs = alphaCalls[0]?.[1] as string[];
+      const betaArgs = betaCalls[0]?.[1] as string[];
+      const gammaArgs = gammaCalls[0]?.[1] as string[];
+
+      expect(alphaArgs).toContain('-O1');
+      expect(alphaArgs).toContain('-O2');
+      expect(alphaArgs).not.toContain('-O3');
+      expect(alphaArgs).not.toContain('-DGROUP=1');
+
+      expect(betaArgs).toContain('-O1');
+      expect(betaArgs).toContain('-O2');
+      expect(betaArgs).toContain('-O3');
+      expect(betaArgs).toContain('-DGROUP=1');
+
+      expect(gammaArgs).toContain('-O1');
+      expect(gammaArgs).toContain('-O2');
+      expect(gammaArgs).toContain('-O3');
+      expect(gammaArgs).toContain('-DGROUP=1');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('allows overlapping sources across sourceGroups with unique objects', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
+    const wasmDir = join(projectRoot, 'wasm');
+    await mkdir(wasmDir, { recursive: true });
+    await writeFile(join(wasmDir, 'alpha.c'), 'int alpha() { return 1; }');
+
+    try {
+      const runCommandMock = vi.mocked(runCommandWithEnv);
+      runCommandMock.mockClear();
+
+      await buildWasm({
+        root: projectRoot,
+        buildDir: join(projectRoot, '.wasm-build'),
+        rule: {
+          targets: {
+            app: {
+              sourceGroups: [
+                {
+                  sources: ['alpha.c'],
+                  options: ['-O2'],
+                },
+                {
+                  sources: ['alpha.c'],
+                  options: ['-O3'],
+                },
+              ],
+            },
+          },
+        },
+      });
+
+      const alphaPath = resolve(projectRoot, 'wasm', 'alpha.c');
+      const compileCalls = runCommandMock.mock.calls.filter((call) => {
+        const args = call[1] as string[] | undefined;
+        return (
+          Array.isArray(args) && args.includes('-c') && args.includes(alphaPath)
+        );
+      });
+
+      expect(compileCalls.length).toBe(2);
+
+      const outputPaths = compileCalls.map((call) => {
+        const args = call[1] as string[];
+        const outIndex = args.indexOf('-o');
+        if (outIndex < 0) {
+          return '';
+        }
+        return args[outIndex + 1] ?? '';
+      });
+
+      expect(outputPaths.some((path) => path.includes('__g0.o'))).toBe(true);
+      expect(outputPaths.some((path) => path.includes('__g1.o'))).toBe(true);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }

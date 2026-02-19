@@ -124,6 +124,145 @@ if (typeof add !== 'function') {
 const result = add(1, 2);
 ```
 
+### ソースファイルの指定
+
+デフォルトでは、 `wasm/**/*.c`, `wasm/**/*.cpp` に対応するファイル群をソースファイルとみなしてビルドを行います。
+先頭の `wasm/` ディレクトリは「ソースファイル基底ディレクトリ」であり、そのディレクトリ配下のソースファイルがコンパイルの対象です。
+
+これを変更するには、 `srcDir` や `sources` を明示的に指定します:
+
+```typescript
+export default defineConfig({
+  plugins: [
+    emsdkEnv({
+      // ソースファイル基底ディレクトリを明示的に指定
+      srcDir: 'wasm',
+      targets: {
+        add: {
+          // ソースファイル群を明示的に指定
+          sources: ['**/*.c++', '**/*.cpp'],
+
+          //  :
+          //  :
+        },
+      },
+    }),
+  ],
+});
+```
+
+- `srcDir` はこの他にも、Viteプラグインがソースコードの変更を監視する起点となるディレクトリとして扱われます。
+  つまり、 `srcDir` ディレクトリ内に存在しないファイル群は、Viteサーバー実行時に変更を検出できません。
+
+### ソースグループ
+
+一つのWASMバイナリを生成するのに、複数の異なるオプションを適用したコンパイルを必要とする場合があります。
+そのような場合は「ソースグループ」を使用して、ソースファイル群を分割定義します:
+
+```typescript
+export default defineConfig({
+  plugins: [
+    emsdkEnv({
+      targets: {
+        add: {
+          // コンパイルオプション（共通）
+          options: ['-O3', '-std=c99'],
+          // ソースグループの定義
+          sourceGroups: [
+            {
+              sources: ['opt/**/*.c'],
+              defines: { OPT: 1 }, // -DOPT=1
+            },
+            {
+              sources: ['opt/**/*.c'],
+              defines: { OPT: 2 }, // -DOPT=2
+            },
+          ],
+
+          //  :
+          //  :
+        },
+      },
+    }),
+  ],
+});
+```
+
+上記の場合、以下のようにコンパイルが実行されます:
+
+- `opt/`ディレクトリ配下のソースコードについて、`OPT=1`でコンパイルを行う。
+- `opt/`ディレクトリ配下のソースコードについて、`OPT=2`でコンパイルを行う。
+- それ以外の全てのソースコードは、追加defineなし。
+  （引き続き、`wasm/`ディレクトリ配下のソースコードはコンパイル対象なので、上記を除いてコンパイルされます）
+
+そして、これらが全てリンカで結合されて `add.wasm` が生成されます。
+従って、`opt/`配下のソースコードは、生成されるシンボルが重複しないように注意する必要があります。
+
+もちろん、互いに関係のないソースファイル群を異なるオプションでコンパイルするのであれば、問題はありません。
+
+### 複数のWASMバイナリをビルド
+
+一つのプロジェクト内で、複数のWASMバイナリを生成する場合もあります。
+そのような場合は、 `targets` に複数のエントリを記述します:
+
+```typescript
+export default defineConfig({
+  plugins: [
+    emsdkEnv({
+      targets: {
+        // "add.wasm" のビルド
+        add: {
+          options: ['-O3', '-std=c99'],
+          defines: {'OPERATOR': 'ADD'},
+
+          //  :
+          //  :
+        },
+        // "mul.wasm" のビルド
+        mul: {
+          options: ['-O3', '-std=c99'],
+          defines: {'OPERATOR': 'MUL'},
+
+          //  :
+          //  :
+        },
+      },
+    }),
+  ],
+});
+```
+
+上記のように `targets` を分割できますが、同じオプション定義が続くような場合は、 `common` を使用して定義を共通化出来ます:
+
+```typescript
+export default defineConfig({
+  plugins: [
+    emsdkEnv({
+      common: {
+        // 共通のコンパイルオプション
+        options: ['-O3', '-std=c99'],
+      },
+      targets: {
+        // "add.wasm" のビルド
+        add: {
+          defines: {'OPERATOR': 'ADD'},
+
+          //  :
+          //  :
+        },
+        // "mul.wasm" のビルド
+        mul: {
+          defines: {'OPERATOR': 'MUL'},
+
+          //  :
+          //  :
+        },
+      },
+    }),
+  ],
+});
+```
+
 TODO:
 
 ---
