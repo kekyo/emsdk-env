@@ -78,3 +78,23 @@ export const resolveEmccCommand = async (
   }
   return 'emcc';
 };
+
+export const resolveEmarCommand = async (
+  env: Record<string, string>,
+  emsdkRoot: string
+) => {
+  if (env.EMAR) {
+    return env.EMAR;
+  }
+  if (env.EMSCRIPTEN) {
+    const candidate = join(env.EMSCRIPTEN, 'emar');
+    if (await pathExists(candidate)) {
+      return candidate;
+    }
+  }
+  const fallback = join(emsdkRoot, 'upstream', 'emscripten', 'emar');
+  if (await pathExists(fallback)) {
+    return fallback;
+  }
+  return 'emar';
+};

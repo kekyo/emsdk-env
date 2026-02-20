@@ -63,6 +63,11 @@ export interface PrepareEmsdkOptions {
 export type DefineValue = string | number | boolean;
 
 /**
+ * Build target type for WASM or archive outputs.
+ */
+export type WasmBuildTargetType = 'wasm' | 'archive';
+
+/**
  * Common build options shared across targets.
  */
 export interface WasmBuildCommonOptions {
@@ -93,7 +98,11 @@ export interface WasmBuildCommonOptions {
  */
 export interface WasmBuildTarget {
   /**
-   * Output WASM file path (relative to `outDir` unless absolute).
+   * Target output type (defaults to 'wasm').
+   */
+  readonly type?: WasmBuildTargetType;
+  /**
+   * Output file path (relative to `outDir` or `libDir` unless absolute).
    */
   readonly outFile?: string;
   /**
@@ -187,6 +196,10 @@ export interface BuildWasmOptions {
    */
   readonly outDir?: string;
   /**
+   * Output directory for generated archives (defaults to `lib`).
+   */
+  readonly libDir?: string;
+  /**
    * Temporary build directory (defaults to OS temp dir).
    */
   readonly buildDir?: string;
@@ -213,7 +226,7 @@ export interface BuildWasmResult {
    */
   readonly emsdkRoot: string;
   /**
-   * Output WASM paths keyed by target name.
+   * Output paths keyed by target name.
    */
   readonly outFiles: Record<string, string>;
 }

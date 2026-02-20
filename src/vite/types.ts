@@ -24,6 +24,10 @@ export interface EmsdkVitePluginOptions extends WasmBuildRule {
    */
   outDir?: string;
   /**
+   * Output directory for generated archives (defaults to `lib`).
+   */
+  libDir?: string;
+  /**
    * Temporary build directory (defaults to OS temp dir).
    */
   buildDir?: string;

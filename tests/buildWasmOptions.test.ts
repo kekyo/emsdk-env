@@ -32,6 +32,7 @@ vi.mock('../src/emsdk', () => ({
 vi.mock('../src/env', () => ({
   loadEmsdkEnv: vi.fn().mockResolvedValue({}),
   resolveEmccCommand: vi.fn().mockResolvedValue('emcc'),
+  resolveEmarCommand: vi.fn().mockResolvedValue('emar'),
 }));
 
 vi.mock('../src/commands', () => ({
@@ -50,11 +51,13 @@ vi.mock('../src/commands', () => ({
         compileConcurrency -= 1;
       }
     }
+    let outFile: string | undefined;
     const outIndex = args.indexOf('-o');
-    if (outIndex === -1) {
-      return;
+    if (outIndex !== -1) {
+      outFile = args[outIndex + 1];
+    } else if (args[0] === 'rcs') {
+      outFile = args[1];
     }
-    const outFile = args[outIndex + 1];
     if (!outFile) {
       return;
     }
@@ -335,6 +338,163 @@ describe('buildWasm options', () => {
 
       expect(outputPaths.some((path) => path.includes('__g0.o'))).toBe(true);
       expect(outputPaths.some((path) => path.includes('__g1.o'))).toBe(true);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('builds archive outputs into libDir', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
+    const wasmDir = join(projectRoot, 'wasm');
+    await mkdir(wasmDir, { recursive: true });
+    await writeFile(join(wasmDir, 'alpha.c'), 'int alpha() { return 1; }');
+
+    const runCommandMock = vi.mocked(runCommandWithEnv);
+    runCommandMock.mockClear();
+
+    try {
+      const result = await buildWasm({
+        root: projectRoot,
+        buildDir: join(projectRoot, '.wasm-build'),
+        rule: {
+          targets: {
+            libalpha: {
+              type: 'archive',
+              sources: ['alpha.c'],
+            },
+          },
+        },
+      });
+
+      const expectedArchive = resolve(projectRoot, 'lib', 'libalpha.a');
+      expect(result.outFiles.libalpha).toBe(expectedArchive);
+
+      const archiveCall = runCommandMock.mock.calls.find(
+        (call) => call[0] === 'emar'
+      );
+      expect(archiveCall).toBeTruthy();
+      const archiveArgs = (archiveCall?.[1] ?? []) as string[];
+      expect(archiveArgs[0]).toBe('rcs');
+      expect(archiveArgs[1]).toBe(expectedArchive);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('adds libDir to wasm link args', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
+    const wasmDir = join(projectRoot, 'wasm');
+    await mkdir(wasmDir, { recursive: true });
+    await writeFile(join(wasmDir, 'alpha.c'), 'int alpha() { return 1; }');
+
+    const runCommandMock = vi.mocked(runCommandWithEnv);
+    runCommandMock.mockClear();
+
+    try {
+      await buildWasm({
+        root: projectRoot,
+        buildDir: join(projectRoot, '.wasm-build'),
+        libDir: 'custom-lib',
+        rule: {
+          targets: {
+            app: {},
+          },
+        },
+      });
+
+      const linkCalls = runCommandMock.mock.calls.filter((call) => {
+        const args = call[1] as string[] | undefined;
+        return (
+          Array.isArray(args) && args.includes('-o') && !args.includes('-c')
+        );
+      });
+      const linkArgs = linkCalls[0]?.[1] as string[] | undefined;
+      expect(linkArgs).toBeTruthy();
+      expect(linkArgs).toContain(`-L${resolve(projectRoot, 'custom-lib')}`);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects linkOptions for archive target', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
+    const wasmDir = join(projectRoot, 'wasm');
+    await mkdir(wasmDir, { recursive: true });
+    await writeFile(join(wasmDir, 'alpha.c'), 'int alpha() { return 1; }');
+
+    try {
+      await expect(
+        buildWasm({
+          root: projectRoot,
+          buildDir: join(projectRoot, '.wasm-build'),
+          rule: {
+            targets: {
+              libalpha: {
+                type: 'archive',
+                linkOptions: ['-s', 'ALLOW_MEMORY_GROWTH=1'],
+              },
+            },
+          },
+        })
+      ).rejects.toThrow('linkOptions is not supported for archive target');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects exports for archive target', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
+    const wasmDir = join(projectRoot, 'wasm');
+    await mkdir(wasmDir, { recursive: true });
+    await writeFile(join(wasmDir, 'alpha.c'), 'int alpha() { return 1; }');
+
+    try {
+      await expect(
+        buildWasm({
+          root: projectRoot,
+          buildDir: join(projectRoot, '.wasm-build'),
+          rule: {
+            targets: {
+              libalpha: {
+                type: 'archive',
+                exports: ['_alpha'],
+              },
+            },
+          },
+        })
+      ).rejects.toThrow('exports is not supported for archive target');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('ignores common linkOptions and exports for archive targets', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
+    const wasmDir = join(projectRoot, 'wasm');
+    await mkdir(wasmDir, { recursive: true });
+    await writeFile(join(wasmDir, 'alpha.c'), 'int alpha() { return 1; }');
+
+    try {
+      const result = await buildWasm({
+        root: projectRoot,
+        buildDir: join(projectRoot, '.wasm-build'),
+        rule: {
+          common: {
+            linkOptions: ['-s', 'ALLOW_MEMORY_GROWTH=1'],
+            exports: ['_common'],
+          },
+          targets: {
+            libalpha: {
+              type: 'archive',
+              sources: ['alpha.c'],
+            },
+          },
+        },
+      });
+
+      expect(result.outFiles.libalpha).toBe(
+        resolve(projectRoot, 'lib', 'libalpha.a')
+      );
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }

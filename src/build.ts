@@ -9,7 +9,7 @@ import { glob } from 'glob';
 import { isAbsolute, join, relative, resolve } from 'path';
 
 import { runCommandWithEnv } from './commands';
-import { loadEmsdkEnv, resolveEmccCommand } from './env';
+import { loadEmsdkEnv, resolveEmarCommand, resolveEmccCommand } from './env';
 import { prepareEmsdk } from './emsdk';
 import { ensureDirectory } from './fs-utils';
 import { createConsoleLogger } from './logger';
@@ -18,12 +18,14 @@ import type {
   BuildWasmResult,
   DefineValue,
   PrepareEmsdkOptions,
+  WasmBuildTargetType,
 } from './types';
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
 const DEFAULT_WASM_SRC_DIR = 'wasm';
 const DEFAULT_WASM_OUT_DIR = join('src', 'wasm');
+const DEFAULT_WASM_LIB_DIR = 'lib';
 const DEFAULT_WASM_BUILD_DIR = join(tmpdir(), 'emsdk-env');
 const DEFAULT_EMSDK_TARGET_VERSION = 'latest';
 
@@ -52,6 +54,9 @@ const createBuildId = () => {
 };
 
 const ensureArray = (value?: readonly string[]) => value ?? [];
+
+const resolveTargetType = (value: WasmBuildTargetType | undefined) =>
+  value ?? 'wasm';
 
 const normalizePrepareOptions = (
   options: PrepareEmsdkOptions | undefined
@@ -165,12 +170,13 @@ const resolveTargetOutFile = (
   targetName: string,
   targetOutFile: string | undefined,
   env: Record<string, string>,
-  outDir: string
+  baseDir: string,
+  extension: string
 ) => {
   if (targetOutFile) {
-    return resolveOutFile(targetOutFile, env, outDir);
+    return resolveOutFile(targetOutFile, env, baseDir);
   }
-  return resolve(outDir, `${targetName}.wasm`);
+  return resolve(baseDir, `${targetName}.${extension}`);
 };
 
 const resolveTargetSources = async (
@@ -244,8 +250,8 @@ export const buildWasm = async (
   if (!options.rule || !options.rule.targets) {
     throw new TypeError('rule targets must be provided.');
   }
-  const targets = Object.entries(options.rule.targets);
-  if (targets.length === 0) {
+  const targetEntries = Object.entries(options.rule.targets);
+  if (targetEntries.length === 0) {
     throw new TypeError('rule targets must not be empty.');
   }
 
@@ -271,6 +277,11 @@ export const buildWasm = async (
     baseEnv,
     'outDir'
   );
+  const rawLibDir = expandPlaceholders(
+    options.libDir ?? DEFAULT_WASM_LIB_DIR,
+    baseEnv,
+    'libDir'
+  );
   const rawBuildDir = expandPlaceholders(
     options.buildDir ?? DEFAULT_WASM_BUILD_DIR,
     baseEnv,
@@ -279,6 +290,7 @@ export const buildWasm = async (
 
   const srcDir = resolvePath(rootDir, rawSrcDir);
   const outDir = resolvePath(rootDir, rawOutDir);
+  const libDir = resolvePath(rootDir, rawLibDir);
   const buildDir = resolvePath(rootDir, rawBuildDir);
   const buildId = createBuildId();
   const buildRunDir = resolve(buildDir, buildId);
@@ -290,6 +302,7 @@ export const buildWasm = async (
     ROOT: rootDir,
     SRC_DIR: srcDir,
     OUT_DIR: outDir,
+    LIB_DIR: libDir,
     BUILD_DIR: buildDir,
   };
 
@@ -297,22 +310,50 @@ export const buildWasm = async (
   const common = options.rule.common ?? {};
 
   await ensureDirectory(outDir);
+  await ensureDirectory(libDir);
   await ensureDirectory(buildDir);
   await rm(buildRunDir, { recursive: true, force: true });
   await ensureDirectory(buildRunDir);
 
+  const hasArchiveTargets = targetEntries.some(
+    ([, target]) => resolveTargetType(target.type) === 'archive'
+  );
+  const emarCommand = hasArchiveTargets
+    ? await resolveEmarCommand(envWithDirs, emsdkRoot)
+    : undefined;
+
   const outFiles: Record<string, string> = {};
 
-  try {
-    for (const [targetName, target] of targets) {
-      const mergedLinkOptions = [
-        ...ensureArray(common.linkOptions),
-        ...ensureArray(target.linkOptions),
-      ];
-      const mergedExports = [
-        ...ensureArray(common.exports),
-        ...ensureArray(target.exports),
-      ];
+  const buildTargets = async (expectedType: WasmBuildTargetType) => {
+    for (const [targetName, target] of targetEntries) {
+      const targetType = resolveTargetType(target.type);
+      if (targetType !== expectedType) {
+        continue;
+      }
+      if (targetType === 'archive') {
+        if (target.linkOptions !== undefined) {
+          throw new Error(
+            `linkOptions is not supported for archive target: ${targetName}`
+          );
+        }
+        if (target.exports !== undefined) {
+          throw new Error(
+            `exports is not supported for archive target: ${targetName}`
+          );
+        }
+      }
+
+      const mergedLinkOptions =
+        targetType === 'archive'
+          ? []
+          : [
+              ...ensureArray(common.linkOptions),
+              ...ensureArray(target.linkOptions),
+            ];
+      const mergedExports =
+        targetType === 'archive'
+          ? []
+          : [...ensureArray(common.exports), ...ensureArray(target.exports)];
       const baseCompileOptions = [
         ...ensureArray(common.options),
         ...ensureArray(target.options),
@@ -334,7 +375,8 @@ export const buildWasm = async (
         targetName,
         target.outFile,
         targetEnv,
-        outDir
+        targetType === 'archive' ? libDir : outDir,
+        targetType === 'archive' ? 'a' : 'wasm'
       );
 
       const sources = await resolveTargetSources(
@@ -373,12 +415,14 @@ export const buildWasm = async (
       await rm(targetBuildDir, { recursive: true, force: true });
       await ensureDirectory(targetBuildDir);
 
-      const resolvedLinkOptions = expandArray(
-        mergedLinkOptions,
-        targetEnv,
-        'linkOptions'
-      );
-      const resolvedExports = expandArray(mergedExports, targetEnv, 'exports');
+      const resolvedLinkOptions =
+        targetType === 'archive'
+          ? []
+          : expandArray(mergedLinkOptions, targetEnv, 'linkOptions');
+      const resolvedExports =
+        targetType === 'archive'
+          ? []
+          : expandArray(mergedExports, targetEnv, 'exports');
       const exportArgs = buildExportFlags(resolvedExports);
       const baseCompileArgs = buildCompileArgs(
         baseCompileOptions,
@@ -488,25 +532,47 @@ export const buildWasm = async (
           )
         : await buildObjectsSequential();
 
-      logger.info(`Linking target: ${targetName}`);
-      const linkArgs = [
-        ...objectFiles,
-        '-o',
-        resolvedOutFile,
-        ...resolvedLinkOptions,
-        ...exportArgs,
-      ];
-      logger.debug(`emcc ${linkArgs.join(' ')}`);
-      await runCommandWithEnv(
-        emccCommand,
-        linkArgs,
-        rootDir,
-        buildEnv,
-        emsdkOptions.signal
-      );
+      if (targetType === 'archive') {
+        if (!emarCommand) {
+          throw new Error('emar command is required for archive targets.');
+        }
+        logger.info(`Archiving target: ${targetName}`);
+        const archiveArgs = ['rcs', resolvedOutFile, ...objectFiles];
+        logger.debug(`emar ${archiveArgs.join(' ')}`);
+        await runCommandWithEnv(
+          emarCommand,
+          archiveArgs,
+          rootDir,
+          buildEnv,
+          emsdkOptions.signal
+        );
+      } else {
+        logger.info(`Linking target: ${targetName}`);
+        const linkArgs = [
+          ...objectFiles,
+          '-o',
+          resolvedOutFile,
+          `-L${libDir}`,
+          ...resolvedLinkOptions,
+          ...exportArgs,
+        ];
+        logger.debug(`emcc ${linkArgs.join(' ')}`);
+        await runCommandWithEnv(
+          emccCommand,
+          linkArgs,
+          rootDir,
+          buildEnv,
+          emsdkOptions.signal
+        );
+      }
 
       outFiles[targetName] = resolvedOutFile;
     }
+  };
+
+  try {
+    await buildTargets('archive');
+    await buildTargets('wasm');
   } finally {
     if (cleanupBuildDir) {
       await rm(buildRunDir, { recursive: true, force: true });
