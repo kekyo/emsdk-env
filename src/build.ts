@@ -380,6 +380,15 @@ const buildCompileArgs = (
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
+/**
+ * Build WASM binaries (and optional archives) from C/C++ sources using emsdk.
+ *
+ * Resolves the SDK via prepareEmsdk, expands build paths, compiles sources,
+ * links targets, and returns output paths keyed by target name.
+ *
+ * @param options - Build options including rule definitions and shared settings.
+ * @returns Build result with the resolved SDK root and output file paths.
+ */
 export const buildWasm = async (
   options: BuildWasmOptions
 ): Promise<BuildWasmResult> => {

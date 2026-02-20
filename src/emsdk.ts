@@ -88,6 +88,15 @@ const isAlreadyExistsError = (error: unknown) =>
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
+/**
+ * Prepare the Emscripten SDK in the local cache and return the SDK root path.
+ *
+ * Clones the emsdk repository if needed, installs the requested version,
+ * and activates it in the cache directory.
+ *
+ * @param options - SDK preparation options.
+ * @returns Absolute path to the prepared SDK root.
+ */
 export const prepareEmsdk = async (
   options: PrepareEmsdkOptions
 ): Promise<string> => {
