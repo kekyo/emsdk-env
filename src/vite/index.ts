@@ -10,6 +10,8 @@ import type { BuildWasmOptions, Logger } from '../types';
 import { buildWasm } from '../build';
 import type { EmsdkVitePluginOptions } from './types';
 import { createViteLoggerAdapter } from './logger';
+import { createConsoleLogger } from '../logger';
+import { git_commit_hash, version } from '../generated/packageMetadata';
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -162,13 +164,9 @@ const resolveWatchTargets = (
 const setupDevServer = async (
   server: ViteDevServer,
   options: EmsdkVitePluginOptions,
-  resolvedConfig: ResolvedConfig
+  resolvedConfig: ResolvedConfig,
+  logger: Logger
 ) => {
-  const logger = createViteLoggerAdapter(
-    resolvedConfig.logger,
-    resolvedConfig.logLevel ?? 'info',
-    'emsdk-env'
-  );
   const buildOptions = createBuildOptions(options, resolvedConfig, logger);
 
   const watchTargets = resolveWatchTargets(options, resolvedConfig);
@@ -234,24 +232,26 @@ const setupDevServer = async (
  */
 const emsdkEnv = (options: EmsdkVitePluginOptions): Plugin => {
   let resolvedConfig: ResolvedConfig | undefined;
+  let logger = createConsoleLogger('emsdk-env'); // fallback console logger.
   return {
     name: 'emsdkEnv',
     enforce: 'pre',
-    configResolved(config) {
+    configResolved: (config) => {
       resolvedConfig = config;
+      logger = createViteLoggerAdapter(
+        resolvedConfig.logger,
+        resolvedConfig.logLevel ?? 'info',
+        'emsdk-env'
+      );
+      logger.info(`${version}-${git_commit_hash}: Started.`);
     },
-    async buildStart() {
+    buildStart: async () => {
       if (!resolvedConfig) {
         throw new Error('Vite config was not resolved.');
       }
       if (resolvedConfig.command !== 'build') {
         return;
       }
-      const logger = createViteLoggerAdapter(
-        resolvedConfig.logger,
-        resolvedConfig.logLevel ?? 'info',
-        'emsdk-env'
-      );
       const buildOptions = createBuildOptions(options, resolvedConfig, logger);
       const buildKey = resolvedConfig.root;
       const existing = buildRuns.get(buildKey);
@@ -269,14 +269,14 @@ const emsdkEnv = (options: EmsdkVitePluginOptions): Plugin => {
       buildRuns.set(buildKey, run);
       await run;
     },
-    async configureServer(server) {
+    configureServer: async (server) => {
       if (!resolvedConfig) {
         throw new Error('Vite config was not resolved.');
       }
       if (resolvedConfig.command !== 'serve') {
         return;
       }
-      await setupDevServer(server, options, resolvedConfig);
+      await setupDevServer(server, options, resolvedConfig, logger);
     },
   };
 };
