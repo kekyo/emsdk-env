@@ -47,6 +47,7 @@ export default defineConfig({
         'glob',
         'os',
         'path',
+        'node:module',
         'url',
         'simple-git',
       ],
