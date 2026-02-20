@@ -12,11 +12,9 @@ Emscripten SDKを使用して、WASM C/C++ソースコードの自動ビルド�
 
 [(English language is here.)](./README.md)
 
-WIP:
-
 ## これは何?
 
-これは、Emscripten SDKを自動的にダウンロードして管理し、プロジェクト内のWASM C/C++コードを自動的にビルド可能にする、Viteプラグインです。
+これは、 [Emscripten SDK](https://github.com/emscripten-core/emsdk) を自動的にダウンロードして管理し、プロジェクト内のWASM C/C++コードを自動的にビルド可能にする、Viteプラグインです。
 このプラグインを使用すれば、あなたのViteプロジェクトに、簡単にWASM C/C++開発環境を構築できます。
 
 使い方は簡単です。このViteプラグインパッケージをあなたのプロジェクトに追加して、以下のように`vite.config`でプラグインを初期化するだけです:
@@ -60,6 +58,8 @@ export default defineConfig({
 - エクスポートシンボルの簡易指定が可能
 - 複数のターゲットWASMバイナリを生成可能
 - ディレクトリパス・コンパイルオプション・リンカオプションのカスタマイズが可能
+- アーカイブライブラリ(`*.a`)のビルドと参照が可能
+- NPMパッケージでWASMライブラリの配布と参照が可能
 
 ---
 
@@ -72,6 +72,9 @@ export default defineConfig({
 ```bash
 $ npm install -D emsdk-env
 ```
+
+- emsdk-envは、Emscripten SDKを自動的にダウンロードしてキャッシュします（位置は `~/.cache/emsdk-env/` 配下です）。
+  従って、手動でEmscripten SDKをセットアップする必要はありません。
 
 ### C/C++ソースコードとバイナリの配置
 
@@ -124,7 +127,15 @@ if (typeof add !== 'function') {
 const result = add(1, 2);
 ```
 
-### ソースファイルの指定
+デフォルトのままで運用するなら、ほぼこれで構成作業はありません。
+
+他のトピックとしては、ソースファイルの明示的な指定、複数のコンパイルオプションの分離適用、複数のターゲット出力を扱う方法、アーカイブライブラリファイルの生成と参照、NPMパッケージの生成と参照、と言った機能があります。
+
+次の章より、これらについて説明します。
+
+---
+
+## ソースファイルの指定
 
 デフォルトでは、 `wasm/**/*.c`, `wasm/**/*.cpp` に対応するファイル群をソースファイルとみなしてビルドを行います。
 先頭の `wasm/` ディレクトリは「ソースファイル基底ディレクトリ」であり、そのディレクトリ配下のソースファイルがコンパイルの対象です。
@@ -154,7 +165,7 @@ export default defineConfig({
 - `srcDir` はこの他にも、Viteプラグインがソースコードの変更を監視する起点となるディレクトリとして扱われます。
   つまり、 `srcDir` ディレクトリ内に存在しないファイル群は、Viteサーバー実行時に変更を検出できません。
 
-### ソースグループ
+## ソースグループ
 
 一つのWASMバイナリを生成するのに、複数の異なるオプションを適用したコンパイルを必要とする場合があります。
 そのような場合は「ソースグループ」を使用して、ソースファイル群を分割定義します:
@@ -200,7 +211,7 @@ export default defineConfig({
 
 もちろん、互いに関係のないソースファイル群を異なるオプションでコンパイルするのであれば、問題はありません。
 
-### 複数のWASMバイナリをビルド
+## 複数のWASMバイナリをビルド
 
 一つのプロジェクト内で、複数のWASMバイナリを生成する場合もあります。
 そのような場合は、 `targets` に複数のエントリを記述します:
@@ -263,7 +274,212 @@ export default defineConfig({
 });
 ```
 
-TODO:
+## アーカイブライブラリ
+
+emsdk-envはアーカイブライブラリ(`*.a`)のビルドと利用もサポートしています。
+ビルドを行うには、ターゲットに`type: 'archive'`を指定するだけです:
+
+```typescript
+export default defineConfig({
+  plugins: [
+    emsdkEnv({
+      targets: {
+        libcalc: {
+          // "libcalc.a"を生成する
+          type: 'archive',
+
+          //  :
+          //  :
+        },
+      },
+    }),
+  ],
+});
+```
+
+アーカイブライブラリファイルは、WASMバイナリとは異なり、デフォルトで `lib/` ディレクトリに配置されます。
+このディレクトリは `libDir` で変更できます。
+
+また、 `lib/` はデフォルトのリンカーオプションに `-Llib` のように指定されています。
+したがって、リンク時に `-lcalc` と指定するだけでこのアーカイブライブラリファイルを参照できます:
+
+```typescript
+export default defineConfig({
+  plugins: [
+    emsdkEnv({
+      // アーカイブライブラリファイル基底ディレクトリを明示的に指定
+      libDir: 'wasm-lib',
+      targets: {
+        // "libcalc.a"
+        libcalc: {
+          type: 'archive',
+
+          //  :
+          //  :
+        },
+        // "offload.wasm"
+        offload: {
+          // "libcalc.a"を参照
+          linkOptions: ['-lcalc'],
+
+          //  :
+          //  :
+        },
+      },
+    }),
+  ],
+});
+```
+
+注意:
+
+- Emscripten SDKでは、慣例として `libcalc.a` のように `lib...` プレフィックスを付与したアーカイブライブラリファイル名を使用します。
+  従って、ターゲット名も同様に `libcalc: { ... }` のようにプレフィックスを適用して下さい。
+  プレフィックスが無くてもビルドは可能で、 `calc.a` のようなアーカイブライブラリファイルを生成できますが、そのままではリンク時に `-lcalc` の指定でリンクすることは出来なくなります。
+
+## NPMパッケージにしてライブラリを配布
+
+emsdk-envを使用すれば、あなたのヘッダファイルとWASMアーカイブとパッケージ化して配布することも出来ます。
+パッケージ化する時に押さえるべきポイントは、インクルードファイル群とアーカイブライブラリファイル群を、特定のディレクトリに配置しておくことです:
+
+```
+project/
+├── package.json
+├── vite.config.ts
+├── wasm/
+│   └── add.c
+├── include/
+│   └── calc.h      // インクルードファイル群
+└── lib/
+    └── libcalc.a   // アーカイブライブラリファイル群
+```
+
+このディレクトリ構成であれば、 `package.json` の `files` キーに `include` と `lib` を加えるだけで完了です:
+
+```json
+{
+  "files": ["include", "lib"]
+
+  //  :
+  //  :
+}
+```
+
+`includeDir` や `libDir` を変更している場合は、 `package.json` に `emsdk-env` キーを加える必要があります:
+
+```json
+{
+  "files": ["inc", "wasm-lib"],
+  "emsdk-env": {
+    "include": "inc",
+    "lib": "wasm-lib"
+  }
+
+  //  :
+  //  :
+}
+```
+
+補足: 次節で解説する `imports` は、Nodeのモジュール解決（`require.resolve` 相当）でパッケージを解決します。
+そのため、パッケージ側に `main` / `exports` / `index.js` などの解決可能なエントリが必要です。
+ヘッダと `.a` だけを配布する場合は、空の `index.js` などを同梱してください。
+例えば、`package.json` を次のように定義して、空の `index.js` を含めます:
+
+```json
+{
+  "name": "wasm-calc-lib",
+  "version": "1.0.0",
+  "main": "index.js",
+  "files": ["index.js", "include", "lib"]
+}
+```
+
+### WASM NPMパッケージを参照する
+
+上記のようにして生成したNPMパッケージは、一般的なNPM運用と同様に、パッケージ依存関係でインストール出来ます。
+通常は `devDependencies` にインストールして下さい。なぜなら、WASMバイナリがビルドされたら、もはやパッケージ側のインクルードファイルやアーカイブライブラリファイルは必要ないからです:
+
+```bash
+$ npm install -D wasm-calc-lib
+```
+
+そして、emsdk-env側では、どのパッケージをWASMビルドで使用するかを `imports` で指定します:
+
+```typescript
+export default defineConfig({
+  plugins: [
+    emsdkEnv({
+      // "wasm-calc-lib"パッケージのライブラリを使用する
+      imports: ['wasm-calc-lib'],
+      targets: {
+        // "offload.wasm"
+        offload: {
+          // "wasm-calc-lib"パッケージの"libcalc.a"を参照
+          linkOptions: ['-lcalc'],
+
+          //  :
+          //  :
+        },
+      },
+    }),
+  ],
+});
+```
+
+これで、各ターゲットは指定されたパッケージのインクルードファイルとアーカイブライブラリファイルを参照できます。
+
+その他:
+
+- インクルードファイルとアーカイブライブラリファイルの探索順序は、 `imports` に指定したパッケージの順序に従います。
+  シンボル競合が発生する場合は、パッケージ順序を調整して下さい。
+- 参照パッケージを `devDependencies` にインストールした場合は、以下の場合に参照に失敗するため、その場合は通常の参照としてインストールし、
+  最終成果物にインクルードファイルやアーカイブライブラリファイルが含まれないようにして下さい:
+  - CI/CD や本番ビルドで `npm ci --omit=dev` を使う
+  - NODE_ENV=production を設定して `npm install` する
+  - ビルド時と実行時の環境を分けており、実行環境には devDependencies を入れない運用
+- yarnを使用する場合は、デフォルトではパッケージ内のファイルを参照出来ない可能性があります。
+  その場合は、 `nodeLinker: node-modules` を使うか、対象パッケージをunpluggedにして実体化する必要があります。
+
+## Viteオプション一覧
+
+`emsdk-env/vite` に渡すオプション（`EmsdkVitePluginOptions`）の一覧です。
+
+| キー              | 型                                | デフォルト                    | 説明                                                                       |
+| :---------------- | :-------------------------------- | :---------------------------- | :------------------------------------------------------------------------- |
+| `emsdk`           | `PrepareEmsdkOptions`             | `{ targetVersion: 'latest' }` | Emscripten SDKの取得設定。                                                 |
+| `srcDir`          | `string`                          | `'wasm'`                      | C/C++ソースのルートディレクトリ（プロジェクトルート相対）。                |
+| `includeDir`      | `string`                          | `'include'`                   | デフォルトのインクルードディレクトリ（プロジェクトルート相対）。           |
+| `outDir`          | `string`                          | `'src/wasm'`                  | WASM出力ディレクトリ（プロジェクトルート相対）。                           |
+| `libDir`          | `string`                          | `'lib'`                       | アーカイブ出力ディレクトリ（プロジェクトルート相対）。                     |
+| `buildDir`        | `string`                          | `<OSのテンポラリ>/emsdk-env`  | 一時ビルドディレクトリ。                                                   |
+| `cleanupBuildDir` | `boolean`                         | `true`                        | ビルド後に一時ディレクトリを削除するか。                                   |
+| `imports`         | `string[]`                        | `[]`                          | 参照するNPMパッケージ名。`include`/`lib` を自動検出して `-I`/`-L` を追加。 |
+| `common`          | `WasmBuildCommonOptions`          | `undefined`                   | 全ターゲットに適用する共通設定。                                           |
+| `targets`         | `Record<string, WasmBuildTarget>` | 必須                          | ターゲット定義。キーがターゲット名。                                       |
+
+`common` と `targets` 内で使える主なキーは以下です。
+
+| キー           | 型                            | デフォルト                     | 説明                                                                         |
+| :------------- | :---------------------------- | :----------------------------- | :--------------------------------------------------------------------------- |
+| `type`         | `'wasm' \| 'archive'`         | `'wasm'`                       | 出力形式。`archive` は `.a` を生成。                                         |
+| `outFile`      | `string`                      | `<target>.wasm` / `<target>.a` | 出力ファイル名（`outDir` / `libDir` 相対）。                                 |
+| `sources`      | `string[]`                    | `['**/*.c', '**/*.cpp']`       | 対象ソース（`srcDir` 相対）。                                                |
+| `sourceGroups` | `WasmBuildSourceGroup[]`      | `[]`                           | 追加オプション付きのソースグループ。                                         |
+| `options`      | `string[]`                    | `[]`                           | `emcc -c` に渡す追加オプション。                                             |
+| `linkOptions`  | `string[]`                    | `[]`                           | リンク時の追加オプション。`archive` では使用不可。                           |
+| `exports`      | `string[]`                    | `[]`                           | `-s EXPORTED_FUNCTIONS=...` で指定するエクスポート。`archive` では使用不可。 |
+| `includeDirs`  | `string[]`                    | `[]`                           | `-I` を追加するインクルードディレクトリ。                                    |
+| `defines`      | `Record<string, DefineValue>` | `{}`                           | `-D` を追加するマクロ定義。                                                  |
+
+`emsdk` に指定できる `PrepareEmsdkOptions` は以下の通りです。
+
+| キー            | 型            | デフォルト                                   | 説明                                           |
+| --------------- | ------------- | -------------------------------------------- | ---------------------------------------------- |
+| `targetVersion` | `string`      | `'latest'`                                   | インストールする Emscripten SDK のバージョン。 |
+| `cacheDir`      | `string`      | `<OSのテンポラリ>/emsdk-env-cache`           | SDKキャッシュの保存先。                        |
+| `repoUrl`       | `string`      | `'https://github.com/emscripten-core/emsdk'` | emsdkリポジトリのURL。                         |
+| `gitPath`       | `string`      | `'git'`                                      | 使用する `git` 実行ファイル。                  |
+| `signal`        | `AbortSignal` | `undefined`                                  | 処理中断用シグナル。                           |
 
 ---
 

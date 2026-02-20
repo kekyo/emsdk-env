@@ -24,6 +24,7 @@ import type {
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
 const DEFAULT_WASM_SRC_DIR = 'wasm';
+const DEFAULT_WASM_INCLUDE_DIR = 'include';
 const DEFAULT_WASM_OUT_DIR = join('src', 'wasm');
 const DEFAULT_WASM_LIB_DIR = 'lib';
 const DEFAULT_IMPORT_INCLUDE_DIR = 'include';
@@ -410,6 +411,11 @@ export const buildWasm = async (
     baseEnv,
     'srcDir'
   );
+  const rawIncludeDir = expandPlaceholders(
+    options.includeDir ?? DEFAULT_WASM_INCLUDE_DIR,
+    baseEnv,
+    'includeDir'
+  );
   const rawOutDir = expandPlaceholders(
     options.outDir ?? DEFAULT_WASM_OUT_DIR,
     baseEnv,
@@ -427,6 +433,7 @@ export const buildWasm = async (
   );
 
   const srcDir = resolvePath(rootDir, rawSrcDir);
+  const includeDir = resolvePath(rootDir, rawIncludeDir);
   const outDir = resolvePath(rootDir, rawOutDir);
   const libDir = resolvePath(rootDir, rawLibDir);
   const buildDir = resolvePath(rootDir, rawBuildDir);
@@ -439,6 +446,7 @@ export const buildWasm = async (
     ...emsdkEnv,
     ROOT: rootDir,
     SRC_DIR: srcDir,
+    INCLUDE_DIR: includeDir,
     OUT_DIR: outDir,
     LIB_DIR: libDir,
     BUILD_DIR: buildDir,
@@ -446,6 +454,8 @@ export const buildWasm = async (
 
   const emccCommand = await resolveEmccCommand(envWithDirs, emsdkRoot);
   const common = options.rule.common ?? {};
+  const commonIncludeDirs =
+    common.includeDirs === undefined ? [includeDir] : common.includeDirs;
   const importDirectories = await resolveImportDirectories(
     rootDir,
     ensureArray(options.imports)
@@ -467,7 +477,7 @@ export const buildWasm = async (
   logger.debug(
     `Detected importIncludeDirs: [${importIncludeDirs.map((p) => `'${p}'`).join(',')}]`
   );
-  logger.info(
+  logger.debug(
     `Detected importLibDirs: [${importLibDirs.map((p) => `'${p}'`).join(',')}]`
   );
 
@@ -524,7 +534,7 @@ export const buildWasm = async (
         ...ensureArray(target.options),
       ];
       const baseIncludeDirs = [
-        ...ensureArray(common.includeDirs),
+        ...ensureArray(commonIncludeDirs),
         ...ensureArray(target.includeDirs),
         ...importIncludeDirs,
       ];
@@ -684,8 +694,8 @@ export const buildWasm = async (
 
       logger.info(
         parallel
-          ? `Building target: ${targetName} [${compileJobs.length}, in parallel]`
-          : `Building target: ${targetName} [${compileJobs.length}]`
+          ? `Building target: '${targetName}' [${compileJobs.length} files, in parallel]`
+          : `Building target: '${targetName}' [${compileJobs.length} files]`
       );
 
       for (let index = 0; index < groupSources.length; index += 1) {
@@ -715,7 +725,7 @@ export const buildWasm = async (
         if (!emarCommand) {
           throw new Error('emar command is required for archive targets.');
         }
-        logger.info(`Archiving target: ${targetName}`);
+        logger.info(`Archiving target: ${targetName}.a`);
         const archiveArgs = ['rcs', resolvedOutFile, ...objectFiles];
         logger.debug(`emar ${archiveArgs.join(' ')}`);
         await runCommandWithEnv(
@@ -726,7 +736,7 @@ export const buildWasm = async (
           emsdkOptions.signal
         );
       } else {
-        logger.info(`Linking target: ${targetName}`);
+        logger.info(`Linking target: ${targetName}.wasm`);
         const linkArgs = [
           ...objectFiles,
           '-o',

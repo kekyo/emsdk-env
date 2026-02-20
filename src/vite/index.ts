@@ -6,13 +6,15 @@
 import { isAbsolute, relative, resolve } from 'path';
 import type { Plugin, ResolvedConfig, ViteDevServer } from 'vite';
 
+import type { BuildWasmOptions, Logger } from '../types';
+import { buildWasm } from '../build';
 import type { EmsdkVitePluginOptions } from './types';
 import { createViteLoggerAdapter } from './logger';
-import { buildWasm } from '../index';
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
 const DEFAULT_WASM_SRC_DIR = 'wasm';
+const DEFAULT_WASM_INCLUDE_DIR = 'include';
 const buildRuns = new Map<string, Promise<void>>();
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
@@ -51,16 +53,18 @@ const resolveIncludeDirs = (
 const createBuildOptions = (
   options: EmsdkVitePluginOptions,
   resolvedConfig: ResolvedConfig,
-  logger: ReturnType<typeof createViteLoggerAdapter>
-) => {
+  logger: Logger
+): BuildWasmOptions => {
   const {
     emsdk,
     srcDir,
+    includeDir,
     imports,
     outDir,
     libDir,
     buildDir,
     cleanupBuildDir,
+    parallel,
     ...rule
   } = options;
   return {
@@ -69,11 +73,13 @@ const createBuildOptions = (
     logger,
     ...(emsdk !== undefined ? { emsdk } : {}),
     ...(srcDir !== undefined ? { srcDir } : {}),
+    ...(includeDir !== undefined ? { includeDir } : {}),
     ...(imports !== undefined ? { imports } : {}),
     ...(outDir !== undefined ? { outDir } : {}),
     ...(libDir !== undefined ? { libDir } : {}),
     ...(buildDir !== undefined ? { buildDir } : {}),
     ...(cleanupBuildDir !== undefined ? { cleanupBuildDir } : {}),
+    ...(parallel !== undefined ? { parallel } : {}),
   };
 };
 
@@ -98,11 +104,18 @@ const resolveWatchTargets = (
     baseEnv,
     'srcDir'
   );
+  const rawIncludeDir = expandPlaceholders(
+    options.includeDir ?? DEFAULT_WASM_INCLUDE_DIR,
+    baseEnv,
+    'includeDir'
+  );
   const srcDir = resolvePath(rootDir, rawSrcDir);
+  const includeDir = resolvePath(rootDir, rawIncludeDir);
 
   const envWithDirs = {
     ROOT: rootDir,
     SRC_DIR: srcDir,
+    INCLUDE_DIR: includeDir,
   };
 
   const patterns = new Set<string>();
@@ -129,7 +142,11 @@ const resolveWatchTargets = (
     }
   };
 
-  addIncludePatterns(options.common?.includeDirs, undefined);
+  const commonIncludeDirs =
+    options.common?.includeDirs === undefined
+      ? [rawIncludeDir]
+      : options.common.includeDirs;
+  addIncludePatterns(commonIncludeDirs, undefined);
   for (const [targetName, target] of Object.entries(options.targets)) {
     addIncludePatterns(target.includeDirs, targetName);
   }

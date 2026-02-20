@@ -31,24 +31,26 @@ export interface Logger {
   readonly error: (msg: string) => void;
 }
 
+/////////////////////////////////////////////////////////////////////
+
 /**
  * Options for the emsdk-env preparer.
  */
 export interface PrepareEmsdkOptions {
   /**
-   * Emscripten SDK version to install (e.g. "latest" or a specific tag).
+   * Emscripten SDK version to install (e.g. "latest" or a specific tag. defaults to 'latest').
    */
   readonly targetVersion?: string;
   /**
-   * Cache directory for the SDK.
+   * Cache directory for the Emscripten SDK (defaults to `~/.cache/emsdk-env`).
    */
   readonly cacheDir?: string;
   /**
-   * Custom emsdk repository URL.
+   * Custom Emscripten SDK repository URL (defaults to the official Emscripten SDK GitHub repository).
    */
   readonly repoUrl?: string;
   /**
-   * Git executable path.
+   * Git executable path (defaults to `git`).
    */
   readonly gitPath?: string;
   /**
@@ -56,6 +58,8 @@ export interface PrepareEmsdkOptions {
    */
   readonly signal?: AbortSignal;
 }
+
+/////////////////////////////////////////////////////////////////////
 
 /**
  * Value type for preprocessor defines.
@@ -72,23 +76,23 @@ export type WasmBuildTargetType = 'wasm' | 'archive';
  */
 export interface WasmBuildCommonOptions {
   /**
-   * Additional compile options passed to `emcc -c`.
+   * Common compile options applied to this target.
    */
   readonly options?: readonly string[];
   /**
-   * Additional link options passed to `emcc` during the final link step.
+   * Additional common link options passed to `emcc` during the final link step.
    */
   readonly linkOptions?: readonly string[];
   /**
-   * Symbols to export (mapped to `-s EXPORTED_FUNCTIONS=...`).
+   * Common symbols to export (mapped to `-s EXPORTED_FUNCTIONS=...`).
    */
   readonly exports?: readonly string[];
   /**
-   * Include directories added as `-I` flags.
+   * Common include directories added as `-I` flags (defaults to `$includeDir`).
    */
   readonly includeDirs?: readonly string[];
   /**
-   * Preprocessor defines applied as `-D` flags.
+   * Common preprocessor defines applied as `-D` flags.
    */
   readonly defines?: Record<string, DefineValue>;
 }
@@ -118,19 +122,19 @@ export interface WasmBuildTarget {
    */
   readonly options?: readonly string[];
   /**
-   * Link options applied to this target.
+   * Additional link options passed to `emcc` during the final link step.
    */
   readonly linkOptions?: readonly string[];
   /**
-   * Symbols to export for this target.
+   * Common symbols to export (mapped to `-s EXPORTED_FUNCTIONS=...`).
    */
   readonly exports?: readonly string[];
   /**
-   * Include directories for this target.
+   * Include directories added as `-I` flags.
    */
   readonly includeDirs?: readonly string[];
   /**
-   * Preprocessor defines for this target.
+   * Preprocessor defines applied as `-D` flags.
    */
   readonly defines?: Record<string, DefineValue>;
 }
@@ -144,15 +148,15 @@ export interface WasmBuildSourceGroup {
    */
   readonly sources: readonly string[];
   /**
-   * Additional compile options for this group.
+   * Compile options applied to this target for this group.
    */
   readonly options?: readonly string[];
   /**
-   * Include directories for this group.
+   * Include directories added as `-I` flags for this group.
    */
   readonly includeDirs?: readonly string[];
   /**
-   * Preprocessor defines for this group.
+   * Preprocessor defines applied as `-D` flags for this group.
    */
   readonly defines?: Record<string, DefineValue>;
 }
@@ -171,30 +175,28 @@ export interface WasmBuildRule {
   readonly targets: Record<string, WasmBuildTarget>;
 }
 
+/////////////////////////////////////////////////////////////////////
+
 /**
- * Options for building WASM binaries.
+ * Common options for building WASM binaries.
  */
-export interface BuildWasmOptions {
+export interface BuildWasmCommonOptions {
   /**
-   * Emscripten SDK setup options.
+   * Emscripten SDK setup options (defaults to `targetVersion: 'latest'`).
    */
   readonly emsdk?: PrepareEmsdkOptions;
-  /**
-   * Build rules describing targets and shared options.
-   */
-  readonly rule: WasmBuildRule;
   /**
    * Package imports that provide include/lib directories.
    */
   readonly imports?: readonly string[];
   /**
-   * Project root directory (defaults to `process.cwd()`).
-   */
-  readonly root?: string;
-  /**
    * Source root directory (defaults to `wasm`).
    */
   readonly srcDir?: string;
+  /**
+   * Default include directory (defaults to `include`).
+   */
+  readonly includeDir?: string;
   /**
    * Output directory for generated WASM files (defaults to `src/wasm`).
    */
@@ -208,13 +210,27 @@ export interface BuildWasmOptions {
    */
   readonly buildDir?: string;
   /**
-   * Remove the build directory after completion.
+   * Remove the build directory after completion. (defaults to true).
    */
   readonly cleanupBuildDir?: boolean;
   /**
-   * Compile sources in parallel.
+   * Compile sources in parallel (defaults to true).
    */
   readonly parallel?: boolean;
+}
+
+/**
+ * Options for building WASM binaries.
+ */
+export interface BuildWasmOptions extends BuildWasmCommonOptions {
+  /**
+   * Build rules describing targets and shared options.
+   */
+  readonly rule: WasmBuildRule;
+  /**
+   * Project root directory (defaults to `process.cwd()`).
+   */
+  readonly root?: string;
   /**
    * Custom logger implementation.
    */

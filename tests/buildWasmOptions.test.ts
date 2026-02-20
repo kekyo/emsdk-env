@@ -500,6 +500,77 @@ describe('buildWasm options', () => {
     }
   });
 
+  test('uses default includeDir when common includeDirs is omitted', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
+    const wasmDir = join(projectRoot, 'wasm');
+    await mkdir(wasmDir, { recursive: true });
+    await writeFile(join(wasmDir, 'alpha.c'), 'int alpha() { return 1; }');
+
+    const runCommandMock = vi.mocked(runCommandWithEnv);
+    runCommandMock.mockClear();
+
+    try {
+      await buildWasm({
+        root: projectRoot,
+        buildDir: join(projectRoot, '.wasm-build'),
+        rule: {
+          targets: {
+            app: {},
+          },
+        },
+      });
+
+      const compileCalls = runCommandMock.mock.calls.filter((call) => {
+        const args = call[1] as string[] | undefined;
+        return Array.isArray(args) && args.includes('-c');
+      });
+      expect(
+        compileCalls.some((call) =>
+          (call[1] as string[]).includes(`-I${resolve(projectRoot, 'include')}`)
+        )
+      ).toBe(true);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('does not add includeDir when common includeDirs is specified', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
+    const wasmDir = join(projectRoot, 'wasm');
+    await mkdir(wasmDir, { recursive: true });
+    await writeFile(join(wasmDir, 'alpha.c'), 'int alpha() { return 1; }');
+
+    const runCommandMock = vi.mocked(runCommandWithEnv);
+    runCommandMock.mockClear();
+
+    try {
+      await buildWasm({
+        root: projectRoot,
+        buildDir: join(projectRoot, '.wasm-build'),
+        rule: {
+          common: {
+            includeDirs: [],
+          },
+          targets: {
+            app: {},
+          },
+        },
+      });
+
+      const compileCalls = runCommandMock.mock.calls.filter((call) => {
+        const args = call[1] as string[] | undefined;
+        return Array.isArray(args) && args.includes('-c');
+      });
+      expect(
+        compileCalls.some((call) =>
+          (call[1] as string[]).includes(`-I${resolve(projectRoot, 'include')}`)
+        )
+      ).toBe(false);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   test('adds import include and lib directories', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
     const wasmDir = join(projectRoot, 'wasm');
