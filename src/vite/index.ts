@@ -53,14 +53,23 @@ const createBuildOptions = (
   resolvedConfig: ResolvedConfig,
   logger: ReturnType<typeof createViteLoggerAdapter>
 ) => {
-  const { emsdk, srcDir, outDir, libDir, buildDir, cleanupBuildDir, ...rule } =
-    options;
+  const {
+    emsdk,
+    srcDir,
+    imports,
+    outDir,
+    libDir,
+    buildDir,
+    cleanupBuildDir,
+    ...rule
+  } = options;
   return {
     rule,
     root: resolvedConfig.root,
     logger,
     ...(emsdk !== undefined ? { emsdk } : {}),
     ...(srcDir !== undefined ? { srcDir } : {}),
+    ...(imports !== undefined ? { imports } : {}),
     ...(outDir !== undefined ? { outDir } : {}),
     ...(libDir !== undefined ? { libDir } : {}),
     ...(buildDir !== undefined ? { buildDir } : {}),

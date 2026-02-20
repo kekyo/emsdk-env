@@ -36,6 +36,7 @@ describe('emsdkEnv', () => {
         targetVersion: '3.1.0',
         cacheDir: '/mock/cache',
       },
+      imports: ['foo'],
       targets: {
         target1: {
           sources: ['**/*.c'],
@@ -66,6 +67,7 @@ describe('emsdkEnv', () => {
         rule: {
           targets: options.targets,
         },
+        imports: options.imports,
         root: '/mock/root',
         logger: expect.any(Object),
       })

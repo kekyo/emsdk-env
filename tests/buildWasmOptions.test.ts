@@ -499,4 +499,155 @@ describe('buildWasm options', () => {
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
+
+  test('adds import include and lib directories', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
+    const wasmDir = join(projectRoot, 'wasm');
+    await mkdir(wasmDir, { recursive: true });
+    await writeFile(join(wasmDir, 'alpha.c'), 'int alpha() { return 1; }');
+
+    const packageDir = join(projectRoot, 'node_modules', 'foo');
+    await mkdir(join(packageDir, 'include'), { recursive: true });
+    await mkdir(join(packageDir, 'lib'), { recursive: true });
+    await writeFile(
+      join(packageDir, 'package.json'),
+      JSON.stringify({ name: 'foo', version: '1.0.0' })
+    );
+    await writeFile(join(packageDir, 'index.js'), 'module.exports = {};');
+
+    const runCommandMock = vi.mocked(runCommandWithEnv);
+    runCommandMock.mockClear();
+
+    try {
+      await buildWasm({
+        root: projectRoot,
+        buildDir: join(projectRoot, '.wasm-build'),
+        imports: ['foo'],
+        rule: {
+          targets: {
+            app: {},
+          },
+        },
+      });
+
+      const compileCalls = runCommandMock.mock.calls.filter((call) => {
+        const args = call[1] as string[] | undefined;
+        return Array.isArray(args) && args.includes('-c');
+      });
+      expect(
+        compileCalls.some((call) =>
+          (call[1] as string[]).includes(`-I${resolve(packageDir, 'include')}`)
+        )
+      ).toBe(true);
+
+      const linkCalls = runCommandMock.mock.calls.filter((call) => {
+        const args = call[1] as string[] | undefined;
+        return (
+          Array.isArray(args) && args.includes('-o') && !args.includes('-c')
+        );
+      });
+      expect(
+        linkCalls.some((call) =>
+          (call[1] as string[]).includes(`-L${resolve(packageDir, 'lib')}`)
+        )
+      ).toBe(true);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('uses emsdk-env config for import directories', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
+    const wasmDir = join(projectRoot, 'wasm');
+    await mkdir(wasmDir, { recursive: true });
+    await writeFile(join(wasmDir, 'alpha.c'), 'int alpha() { return 1; }');
+
+    const packageDir = join(projectRoot, 'node_modules', 'foo');
+    await mkdir(join(packageDir, 'inc'), { recursive: true });
+    await mkdir(join(packageDir, 'library'), { recursive: true });
+    await writeFile(
+      join(packageDir, 'package.json'),
+      JSON.stringify({
+        name: 'foo',
+        version: '1.0.0',
+        'emsdk-env': {
+          include: 'inc',
+          lib: 'library',
+        },
+      })
+    );
+    await writeFile(join(packageDir, 'index.js'), 'module.exports = {};');
+
+    const runCommandMock = vi.mocked(runCommandWithEnv);
+    runCommandMock.mockClear();
+
+    try {
+      await buildWasm({
+        root: projectRoot,
+        buildDir: join(projectRoot, '.wasm-build'),
+        imports: ['foo'],
+        rule: {
+          targets: {
+            app: {},
+          },
+        },
+      });
+
+      const compileCalls = runCommandMock.mock.calls.filter((call) => {
+        const args = call[1] as string[] | undefined;
+        return Array.isArray(args) && args.includes('-c');
+      });
+      expect(
+        compileCalls.some((call) =>
+          (call[1] as string[]).includes(`-I${resolve(packageDir, 'inc')}`)
+        )
+      ).toBe(true);
+
+      const linkCalls = runCommandMock.mock.calls.filter((call) => {
+        const args = call[1] as string[] | undefined;
+        return (
+          Array.isArray(args) && args.includes('-o') && !args.includes('-c')
+        );
+      });
+      expect(
+        linkCalls.some((call) =>
+          (call[1] as string[]).includes(`-L${resolve(packageDir, 'library')}`)
+        )
+      ).toBe(true);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('fails when import directories are missing', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
+    const wasmDir = join(projectRoot, 'wasm');
+    await mkdir(wasmDir, { recursive: true });
+    await writeFile(join(wasmDir, 'alpha.c'), 'int alpha() { return 1; }');
+
+    const packageDir = join(projectRoot, 'node_modules', 'foo');
+    await mkdir(packageDir, { recursive: true });
+    await writeFile(
+      join(packageDir, 'package.json'),
+      JSON.stringify({ name: 'foo', version: '1.0.0' })
+    );
+    await writeFile(join(packageDir, 'index.js'), 'module.exports = {};');
+
+    try {
+      await expect(
+        buildWasm({
+          root: projectRoot,
+          buildDir: join(projectRoot, '.wasm-build'),
+          imports: ['foo'],
+          rule: {
+            targets: {
+              app: {},
+            },
+          },
+        })
+      ).rejects.toThrow('does not provide include or lib directories');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
 });

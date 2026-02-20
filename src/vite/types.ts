@@ -20,6 +20,10 @@ export interface EmsdkVitePluginOptions extends WasmBuildRule {
    */
   srcDir?: string;
   /**
+   * Package imports that provide include/lib directories.
+   */
+  imports?: readonly string[];
+  /**
    * Output directory for generated WASM files (defaults to `src/wasm`).
    */
   outDir?: string;

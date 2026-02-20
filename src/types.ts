@@ -184,6 +184,10 @@ export interface BuildWasmOptions {
    */
   readonly rule: WasmBuildRule;
   /**
+   * Package imports that provide include/lib directories.
+   */
+  readonly imports?: readonly string[];
+  /**
    * Project root directory (defaults to `process.cwd()`).
    */
   readonly root?: string;
