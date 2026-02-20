@@ -464,6 +464,7 @@ export const buildWasm = async (
   const importLibDirs = importDirectories.libDirs;
   const linkLibDirs = dedupeValues([libDir, ...importLibDirs]);
 
+  // Outputs path variables in debug
   logger.debug(`Detected rootDir: '${rootDir}'`);
   logger.debug(`Detected srcDir: '${srcDir}'`);
   logger.debug(`Detected outDir: '${outDir}'`);
@@ -684,6 +685,8 @@ export const buildWasm = async (
         args: CompileArgs;
         groupIndex: number | undefined;
       }> = [];
+
+      // Aggregates base `sources` to the job list
       for (const source of baseSources) {
         compileJobs.push({
           source,
@@ -692,12 +695,7 @@ export const buildWasm = async (
         });
       }
 
-      logger.info(
-        parallel
-          ? `Building target: '${targetName}' [${compileJobs.length} files, in parallel]`
-          : `Building target: '${targetName}' [${compileJobs.length} files]`
-      );
-
+      // Aggregates grouped `sources` to the job list
       for (let index = 0; index < groupSources.length; index += 1) {
         const sourcesInGroup = groupSources[index];
         if (!sourcesInGroup) {
@@ -711,6 +709,15 @@ export const buildWasm = async (
           compileJobs.push({ source, args: groupArgs, groupIndex: index });
         }
       }
+
+      // Final job stats to logger
+      logger.info(
+        parallel
+          ? `Building target: '${targetName}' [${compileJobs.length} files, in parallel]`
+          : `Building target: '${targetName}' [${compileJobs.length} files]`
+      );
+
+      // Execute the job
       const objectFiles = parallel
         ? await Promise.all(
             compileJobs.map((job) =>
@@ -722,6 +729,7 @@ export const buildWasm = async (
       //--------------------------------------------------------
 
       if (targetType === 'archive') {
+        // Execute emsdk archiver
         if (!emarCommand) {
           throw new Error('emar command is required for archive targets.');
         }
@@ -736,6 +744,7 @@ export const buildWasm = async (
           emsdkOptions.signal
         );
       } else {
+        // Execute emsdk linker
         logger.info(`Linking target: ${targetName}.wasm`);
         const linkArgs = [
           ...objectFiles,
