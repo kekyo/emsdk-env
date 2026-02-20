@@ -6,7 +6,7 @@
 import { join } from 'path';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
-import { buildWasm } from '../../src/index';
+import { buildWasm } from '../../src/build';
 import emsdkEnv from '../../src/vite/index';
 
 const { debugMock, debugFactory } = vi.hoisted(() => ({
@@ -18,7 +18,7 @@ vi.mock('debug', () => ({
   default: debugFactory,
 }));
 
-vi.mock('../../src/index', () => ({
+vi.mock('../../src/build', () => ({
   buildWasm: vi.fn().mockResolvedValue({
     emsdkRoot: '/mock/emsdk',
     outFiles: {},
@@ -36,6 +36,8 @@ describe('emsdkEnv', () => {
         targetVersion: '3.1.0',
         cacheDir: '/mock/cache',
       },
+      includeDir: 'include',
+      imports: ['foo'],
       targets: {
         target1: {
           sources: ['**/*.c'],
@@ -66,6 +68,8 @@ describe('emsdkEnv', () => {
         rule: {
           targets: options.targets,
         },
+        imports: options.imports,
+        includeDir: options.includeDir,
         root: '/mock/root',
         logger: expect.any(Object),
       })
@@ -105,7 +109,11 @@ describe('emsdkEnv', () => {
       })
     );
     const call = vi.mocked(buildWasm).mock.calls[0]?.[0];
+    if (!call) {
+      throw new Error('buildWasm was not called with options.');
+    }
     expect(call?.emsdk).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(call, 'emsdk')).toBe(false);
   });
 
   test('runs buildWasm on serve and reloads after changes', async () => {

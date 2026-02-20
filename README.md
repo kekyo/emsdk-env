@@ -12,11 +12,10 @@ A Vite plugin that automatically builds WASM C/C++ source code using the Emscrip
 
 [(Japanese language is here/日本語はこちら)](./README_ja.md)
 
-WIP:
-
 ## What is this?
 
-This is a Vite plugin that automatically downloads and manages the Emscripten SDK, and makes it possible to automatically build WASM C/C++ code in your project.
+This is a Vite plugin that automatically downloads and manages the [Emscripten SDK](https://github.com/emscripten-core/emsdk),
+and makes it possible to automatically build WASM C/C++ code in your project.
 With this plugin, you can easily set up a WASM C/C++ development environment in your Vite project.
 
 Usage is simple. Just add this Vite plugin package to your project and initialize the plugin in `vite.config` like this:
@@ -60,6 +59,8 @@ You can focus on writing C/C++ code just like you would TypeScript/JavaScript co
 - Simplified specification of export symbols
 - Ability to generate multiple target WASM binaries
 - Customizable directory paths, compile options, and linker options
+- Archive libraries (`*.a`) can be built and referenced
+- WASM libraries can be distributed and referenced via NPM packages
 
 ---
 
@@ -72,6 +73,9 @@ Add to `devDependencies` (emsdk-env itself does not require runtime code):
 ```bash
 $ npm install -D emsdk-env
 ```
+
+- emsdk-env automatically downloads and caches the Emscripten SDK (located under `~/.cache/emsdk-env/`).
+  Therefore, you do not need to manually set up the Emscripten SDK.
 
 ### C/C++ Source Code and Binary Placement
 
@@ -98,7 +102,8 @@ project/
 
 Of course, you can change these. Specify them in the Vite plugin options.
 
-You might find it odd that the built binary is placed in `src/wasm/`, but this is because the Vite server defaults to a path where it can easily access WASM binaries.
+You might find it odd that the built binary is placed in `src/wasm/`,
+but this is because the Vite server defaults to a path where it can easily access WASM binaries.
 A WASM binary placed here can be called using boilerplate code like the following:
 
 ```typescript
@@ -124,7 +129,17 @@ if (typeof add !== 'function') {
 const result = add(1, 2);
 ```
 
-### Specifying Source Files
+If you plan to operate with the default settings, there is essentially no configuration work required.
+
+Other topics include features such as explicitly specifying source files,
+applying multiple compile options separately, handling multiple target outputs,
+generating and referencing archive library files, and compilation and referencing NPM packages.
+
+We will cover these starting in the next chapter.
+
+---
+
+## Specifying Source Files
 
 By default, files matching `wasm/**/*.c` and `wasm/**/*.cpp` are treated as source files and built.
 The leading `wasm/` directory is the "source root directory", and any source file under it becomes a compile target.
@@ -151,9 +166,10 @@ export default defineConfig({
 });
 ```
 
-- `srcDir` is also used as the root directory that the Vite plugin watches for source changes. Files outside `srcDir` will not trigger rebuilds during the Vite dev server.
+- `srcDir` is also used as the root directory that the Vite plugin watches for source changes.
+  Files outside `srcDir` will not trigger rebuilds during the Vite dev server.
 
-### Source Groups
+## Source Groups
 
 Building a single WASM binary may require compiling different sources with different options.
 In that case, use "source groups" to split source files into groups:
@@ -198,7 +214,7 @@ Therefore, take care to avoid symbol collisions for sources under `opt/`.
 
 If you compile unrelated source sets with different options, there is no problem.
 
-### Building Multiple WASM Binaries
+## Building Multiple WASM Binaries
 
 You may want to generate multiple WASM binaries in a single project.
 In that case, add multiple entries under `targets`:
@@ -261,7 +277,211 @@ export default defineConfig({
 });
 ```
 
-TODO:
+## Archive Libraries
+
+emsdk-env also supports building and using archive libraries (`*.a`).
+To build one, set `type: 'archive'` on the target:
+
+```typescript
+export default defineConfig({
+  plugins: [
+    emsdkEnv({
+      targets: {
+        libcalc: {
+          // Generate "libcalc.a"
+          type: 'archive',
+
+          //  :
+          //  :
+        },
+      },
+    }),
+  ],
+});
+```
+
+Archive libraries are placed under `lib/` by default (unlike WASM binaries).
+You can change this directory with `libDir`.
+
+`lib/` is also included in the default linker options as `-Llib`.
+That means you can reference the archive with just `-lcalc` at link time:
+
+```typescript
+export default defineConfig({
+  plugins: [
+    emsdkEnv({
+      // Explicitly set the archive base directory
+      libDir: 'wasm-lib',
+      targets: {
+        // "libcalc.a"
+        libcalc: {
+          type: 'archive',
+
+          //  :
+          //  :
+        },
+        // "offload.wasm"
+        offload: {
+          // Reference "libcalc.a"
+          linkOptions: ['-lcalc'],
+
+          //  :
+          //  :
+        },
+      },
+    }),
+  ],
+});
+```
+
+Note: The Emscripten SDK uses archive library filenames with the `lib...` prefix, such as `libcalc.a`, as a convention.
+Therefore, apply the prefix similarly to the target name, such as `libcalc: { ... }`.
+While builds are possible without the prefix and can generate archive library files
+like `calc.a`, linking with `-lcalc` will not work without the prefix.
+
+## Distribute Libraries as an NPM Package
+
+With emsdk-env, you can package and distribute your header files and WASM archives.
+The key point is to place include files and archive libraries under fixed directories:
+
+```
+project/
+├── package.json
+├── vite.config.ts
+├── wasm/
+│   └── add.c
+├── include/
+│   └── calc.h      // Include files
+└── lib/
+    └── libcalc.a   // Archive libraries
+```
+
+With this structure, just add `include` and `lib` to `files` in `package.json`:
+
+```json
+{
+  "files": ["include", "lib"]
+
+  //  :
+  //  :
+}
+```
+
+If you changed `includeDir` or `libDir`, add an `emsdk-env` key to `package.json`:
+
+```json
+{
+  "files": ["inc", "wasm-lib"],
+  "emsdk-env": {
+    "include": "inc",
+    "lib": "wasm-lib"
+  }
+
+  //  :
+  //  :
+}
+```
+
+Note: The `imports` explained in the next section resolve packages using Node's module resolution (equivalent to `require.resolve`).
+Therefore, the package must have resolvable entries such as `main`, `exports`, or `index.js`.
+When distributing only headers and `.a` files, include an empty `index.js` or similar.
+For example, define `package.json` as follows to include an empty `index.js`:
+
+```json
+{
+  "name": "wasm-calc-lib",
+  "version": "1.0.0",
+  "main": "index.js",
+  "files": ["index.js", "include", "lib"]
+}
+```
+
+### Referencing a WASM NPM Package
+
+Packages built as above can be installed like any other NPM package.
+Normally, install them in `devDependencies`, because once the WASM binary is built,
+the package's include files and archive libraries are no longer needed:
+
+```bash
+$ npm install -D wasm-calc-lib
+```
+
+On the emsdk-env side, specify which packages to use via `imports`:
+
+```typescript
+export default defineConfig({
+  plugins: [
+    emsdkEnv({
+      // Use the library from "wasm-calc-lib"
+      imports: ['wasm-calc-lib'],
+      targets: {
+        // "offload.wasm"
+        offload: {
+          // Reference "libcalc.a" from "wasm-calc-lib"
+          linkOptions: ['-lcalc'],
+
+          //  :
+          //  :
+        },
+      },
+    }),
+  ],
+});
+```
+
+Each target can now reference include files and archive libraries from the specified packages.
+
+Others:
+
+- The search order follows the order in `imports`.
+  If you get symbol collisions, adjust the package order.
+- If you installed a referenced package in `devDependencies`, resolution fails in these cases: `npm ci --omit=dev`;
+  `npm install` with `NODE_ENV=production`;
+  or when build and runtime environments are split and runtime omits devDependencies.
+  In those cases, install it as a normal dependency and make sure include/archive files are not shipped in the final artifact.
+- When using yarn, files inside the package may not be accessible by default.
+  Use `nodeLinker: node-modules` or mark the target package as unplugged so it is materialized.
+
+## Vite Options
+
+The options accepted by `emsdk-env/vite` (`EmsdkVitePluginOptions`) are:
+
+| Key               | Type                              | Default                       | Description                                                                             |
+| :---------------- | :-------------------------------- | :---------------------------- | :-------------------------------------------------------------------------------------- |
+| `emsdk`           | `PrepareEmsdkOptions`             | `{ targetVersion: 'latest' }` | Emscripten SDK setup.                                                                   |
+| `srcDir`          | `string`                          | `'wasm'`                      | Root directory for C/C++ sources (project-root relative).                               |
+| `includeDir`      | `string`                          | `'include'`                   | Default include directory (project-root relative).                                      |
+| `outDir`          | `string`                          | `'src/wasm'`                  | WASM output directory (project-root relative).                                          |
+| `libDir`          | `string`                          | `'lib'`                       | Archive output directory (project-root relative).                                       |
+| `buildDir`        | `string`                          | `<OS temp>/emsdk-env`         | Temporary build directory.                                                              |
+| `cleanupBuildDir` | `boolean`                         | `true`                        | Whether to delete the temp directory after build.                                       |
+| `imports`         | `string[]`                        | `[]`                          | NPM packages to reference. Auto-detects `include`/`lib` and adds `-I`/`-L` accordingly. |
+| `common`          | `WasmBuildCommonOptions`          | `undefined`                   | Common settings applied to all targets.                                                 |
+| `targets`         | `Record<string, WasmBuildTarget>` | Required                      | Target definitions, keyed by target name.                                               |
+
+The main keys available under `common` and `targets` are:
+
+| Key            | Type                          | Default                        | Description                                                                  |
+| :------------- | :---------------------------- | :----------------------------- | :--------------------------------------------------------------------------- |
+| `type`         | `'wasm' \| 'archive'`         | `'wasm'`                       | Output type. `archive` produces `.a`.                                        |
+| `outFile`      | `string`                      | `<target>.wasm` / `<target>.a` | Output file name (relative to `outDir` / `libDir`).                          |
+| `sources`      | `string[]`                    | `['**/*.c', '**/*.cpp']`       | Source globs (relative to `srcDir`).                                         |
+| `sourceGroups` | `WasmBuildSourceGroup[]`      | `[]`                           | Source groups with additional options.                                       |
+| `options`      | `string[]`                    | `[]`                           | Extra options passed to `emcc -c`.                                           |
+| `linkOptions`  | `string[]`                    | `[]`                           | Extra linker options. Not available for `archive`.                           |
+| `exports`      | `string[]`                    | `[]`                           | Exports passed via `-s EXPORTED_FUNCTIONS=...`. Not available for `archive`. |
+| `includeDirs`  | `string[]`                    | `[]`                           | Additional include directories (`-I`).                                       |
+| `defines`      | `Record<string, DefineValue>` | `{}`                           | Macro definitions (`-D`).                                                    |
+
+`PrepareEmsdkOptions` supports:
+
+| Key             | Type          | Default                                      | Description                        |
+| --------------- | ------------- | -------------------------------------------- | ---------------------------------- |
+| `targetVersion` | `string`      | `'latest'`                                   | Emscripten SDK version to install. |
+| `cacheDir`      | `string`      | `<OS temp>/emsdk-env-cache`                  | SDK cache location.                |
+| `repoUrl`       | `string`      | `'https://github.com/emscripten-core/emsdk'` | emsdk repository URL.              |
+| `gitPath`       | `string`      | `'git'`                                      | `git` executable to use.           |
+| `signal`        | `AbortSignal` | `undefined`                                  | Abort signal for cancellation.     |
 
 ---
 

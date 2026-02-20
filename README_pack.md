@@ -9,14 +9,13 @@ A Vite plugin that automatically builds WASM C/C++ source code using the Emscrip
 
 ---
 
-WIP:
-
 ## What is this?
 
-This is a Vite plugin that automatically downloads and manages the Emscripten SDK, and makes it possible to automatically build WASM C/C++ code in your project.
+This is a Vite plugin that automatically downloads and manages the [Emscripten SDK](https://github.com/emscripten-core/emsdk),
+and makes it possible to automatically build WASM C/C++ code in your project.
 With this plugin, you can easily set up a WASM C/C++ development environment in your Vite project.
 
-Usage is simple. Just add this Vite plugin package to your project and initialize the plugin in `vite.config.ts` like this:
+Usage is simple. Just add this Vite plugin package to your project and initialize the plugin in `vite.config` like this:
 
 ```typescript
 // `vite.config.ts`
@@ -57,6 +56,8 @@ You can focus on writing C/C++ code just like you would TypeScript/JavaScript co
 - Simplified specification of export symbols
 - Ability to generate multiple target WASM binaries
 - Customizable directory paths, compile options, and linker options
+- Archive libraries (`*.a`) can be built and referenced
+- WASM libraries can be distributed and referenced via NPM packages
 
 ---
 
@@ -69,6 +70,9 @@ Add to `devDependencies` (emsdk-env itself does not require runtime code):
 ```bash
 $ npm install -D emsdk-env
 ```
+
+- emsdk-env automatically downloads and caches the Emscripten SDK (located under `~/.cache/emsdk-env/`).
+  Therefore, you do not need to manually set up the Emscripten SDK.
 
 ### C/C++ Source Code and Binary Placement
 
@@ -87,6 +91,19 @@ project/
 └── wasm/
     └── add.c
 ```
+
+- In addition to the above, a temporary build directory is created under the OS temp directory.
+  The default location is `${TMPDIR}/emsdk-env` (typically `/tmp/emsdk-env` on Unix).
+  This directory is used during the build process and is typically deleted after the build completes.
+  If you override `buildDir` to point inside the project, add it to `.gitignore`.
+
+Of course, you can change these. Specify them in the Vite plugin options.
+
+You might find it odd that the built binary is placed in `src/wasm/`, but this is because the Vite server defaults to a path where it can easily access WASM binaries.
+
+If you plan to operate with the default settings, there is essentially no configuration work required.
+
+Other topics include features such as explicitly specifying source files, applying multiple compile options separately, handling multiple target outputs, generating and referencing archive library files, and compilation and referencing NPM packages.
 
 ### Documents
 

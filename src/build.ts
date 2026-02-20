@@ -3,27 +3,32 @@
 // Under MIT.
 // https://github.com/kekyo/emsdk-env
 
-import { rm } from 'fs/promises';
+import { readFile, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { glob } from 'glob';
-import { isAbsolute, join, relative, resolve } from 'path';
+import { dirname, isAbsolute, join, relative, resolve } from 'path';
 
 import { runCommandWithEnv } from './commands';
-import { loadEmsdkEnv, resolveEmccCommand } from './env';
+import { loadEmsdkEnv, resolveEmarCommand, resolveEmccCommand } from './env';
 import { prepareEmsdk } from './emsdk';
-import { ensureDirectory } from './fs-utils';
+import { ensureDirectory, pathExists } from './fs-utils';
 import { createConsoleLogger } from './logger';
 import type {
   BuildWasmOptions,
   BuildWasmResult,
   DefineValue,
   PrepareEmsdkOptions,
+  WasmBuildTargetType,
 } from './types';
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
 const DEFAULT_WASM_SRC_DIR = 'wasm';
+const DEFAULT_WASM_INCLUDE_DIR = 'include';
 const DEFAULT_WASM_OUT_DIR = join('src', 'wasm');
+const DEFAULT_WASM_LIB_DIR = 'lib';
+const DEFAULT_IMPORT_INCLUDE_DIR = 'include';
+const DEFAULT_IMPORT_LIB_DIR = 'lib';
 const DEFAULT_WASM_BUILD_DIR = join(tmpdir(), 'emsdk-env');
 const DEFAULT_EMSDK_TARGET_VERSION = 'latest';
 
@@ -52,6 +57,9 @@ const createBuildId = () => {
 };
 
 const ensureArray = (value?: readonly string[]) => value ?? [];
+
+const resolveTargetType = (value: WasmBuildTargetType | undefined) =>
+  value ?? 'wasm';
 
 const normalizePrepareOptions = (
   options: PrepareEmsdkOptions | undefined
@@ -165,12 +173,13 @@ const resolveTargetOutFile = (
   targetName: string,
   targetOutFile: string | undefined,
   env: Record<string, string>,
-  outDir: string
+  baseDir: string,
+  extension: string
 ) => {
   if (targetOutFile) {
-    return resolveOutFile(targetOutFile, env, outDir);
+    return resolveOutFile(targetOutFile, env, baseDir);
   }
-  return resolve(outDir, `${targetName}.wasm`);
+  return resolve(baseDir, `${targetName}.${extension}`);
 };
 
 const resolveTargetSources = async (
@@ -212,6 +221,142 @@ const dedupeSources = (sources: string[]) => {
   return deduped;
 };
 
+const dedupeValues = (values: readonly string[]) => {
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const value of values) {
+    if (seen.has(value)) {
+      continue;
+    }
+    seen.add(value);
+    deduped.push(value);
+  }
+  return deduped;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+const resolvePackageJsonPath = async (
+  startPath: string,
+  packageName: string
+) => {
+  let current = dirname(startPath);
+  for (;;) {
+    const candidate = join(current, 'package.json');
+    if (await pathExists(candidate)) {
+      return candidate;
+    }
+    const parent = dirname(current);
+    if (parent === current) {
+      throw new Error(`package.json not found for import: ${packageName}`);
+    }
+    current = parent;
+  }
+};
+
+const loadPackageJson = async (
+  packageJsonPath: string,
+  packageName: string
+) => {
+  try {
+    const raw = await readFile(packageJsonPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!isRecord(parsed)) {
+      throw new Error('package.json must be an object.');
+    }
+    return parsed;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Failed to read package.json for import ${packageName}: ${message}`
+    );
+  }
+};
+
+const resolveImportPaths = async (
+  resolver: NodeJS.Require,
+  packageName: string
+) => {
+  let resolvedEntry: string;
+  try {
+    resolvedEntry = resolver.resolve(packageName);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to resolve import ${packageName}: ${message}`);
+  }
+
+  const packageJsonPath = await resolvePackageJsonPath(
+    resolvedEntry,
+    packageName
+  );
+  const packageRoot = dirname(packageJsonPath);
+  const packageJson = await loadPackageJson(packageJsonPath, packageName);
+  const emsdkConfigRaw = packageJson['emsdk-env'];
+  if (emsdkConfigRaw !== undefined && !isRecord(emsdkConfigRaw)) {
+    throw new Error(
+      `Invalid emsdk-env config for import ${packageName}: expected an object.`
+    );
+  }
+
+  const includeRaw = isRecord(emsdkConfigRaw)
+    ? emsdkConfigRaw.include
+    : undefined;
+  if (includeRaw !== undefined && typeof includeRaw !== 'string') {
+    throw new Error(
+      `Invalid emsdk-env include for import ${packageName}: expected a string.`
+    );
+  }
+  const libRaw = isRecord(emsdkConfigRaw) ? emsdkConfigRaw.lib : undefined;
+  if (libRaw !== undefined && typeof libRaw !== 'string') {
+    throw new Error(
+      `Invalid emsdk-env lib for import ${packageName}: expected a string.`
+    );
+  }
+
+  const includeRel = includeRaw ?? DEFAULT_IMPORT_INCLUDE_DIR;
+  const libRel = libRaw ?? DEFAULT_IMPORT_LIB_DIR;
+  const includeDir = resolve(packageRoot, includeRel);
+  const libDir = resolve(packageRoot, libRel);
+  const includeExists = await pathExists(includeDir);
+  const libExists = await pathExists(libDir);
+  if (!includeExists && !libExists) {
+    throw new Error(
+      `Import ${packageName} does not provide include or lib directories.`
+    );
+  }
+  return {
+    includeDir: includeExists ? includeDir : undefined,
+    libDir: libExists ? libDir : undefined,
+  };
+};
+
+const resolveImportDirectories = async (
+  rootDir: string,
+  imports: readonly string[]
+) => {
+  if (imports.length === 0) {
+    return { includeDirs: [], libDirs: [] };
+  }
+  const moduleApi = await import('node:module');
+  const resolver = moduleApi.createRequire(resolve(rootDir, 'package.json'));
+  const includeDirs: string[] = [];
+  const libDirs: string[] = [];
+  for (const packageName of imports) {
+    const resolved = await resolveImportPaths(resolver, packageName);
+    if (resolved.includeDir) {
+      includeDirs.push(resolved.includeDir);
+    }
+    if (resolved.libDir) {
+      libDirs.push(resolved.libDir);
+    }
+  }
+  return {
+    includeDirs: dedupeValues(includeDirs),
+    libDirs: dedupeValues(libDirs),
+  };
+};
+
 type CompileArgs = {
   resolvedOptions: readonly string[];
   includeArgs: readonly string[];
@@ -244,8 +389,8 @@ export const buildWasm = async (
   if (!options.rule || !options.rule.targets) {
     throw new TypeError('rule targets must be provided.');
   }
-  const targets = Object.entries(options.rule.targets);
-  if (targets.length === 0) {
+  const targetEntries = Object.entries(options.rule.targets);
+  if (targetEntries.length === 0) {
     throw new TypeError('rule targets must not be empty.');
   }
 
@@ -266,10 +411,20 @@ export const buildWasm = async (
     baseEnv,
     'srcDir'
   );
+  const rawIncludeDir = expandPlaceholders(
+    options.includeDir ?? DEFAULT_WASM_INCLUDE_DIR,
+    baseEnv,
+    'includeDir'
+  );
   const rawOutDir = expandPlaceholders(
     options.outDir ?? DEFAULT_WASM_OUT_DIR,
     baseEnv,
     'outDir'
+  );
+  const rawLibDir = expandPlaceholders(
+    options.libDir ?? DEFAULT_WASM_LIB_DIR,
+    baseEnv,
+    'libDir'
   );
   const rawBuildDir = expandPlaceholders(
     options.buildDir ?? DEFAULT_WASM_BUILD_DIR,
@@ -278,7 +433,9 @@ export const buildWasm = async (
   );
 
   const srcDir = resolvePath(rootDir, rawSrcDir);
+  const includeDir = resolvePath(rootDir, rawIncludeDir);
   const outDir = resolvePath(rootDir, rawOutDir);
+  const libDir = resolvePath(rootDir, rawLibDir);
   const buildDir = resolvePath(rootDir, rawBuildDir);
   const buildId = createBuildId();
   const buildRunDir = resolve(buildDir, buildId);
@@ -289,37 +446,97 @@ export const buildWasm = async (
     ...emsdkEnv,
     ROOT: rootDir,
     SRC_DIR: srcDir,
+    INCLUDE_DIR: includeDir,
     OUT_DIR: outDir,
+    LIB_DIR: libDir,
     BUILD_DIR: buildDir,
   };
 
   const emccCommand = await resolveEmccCommand(envWithDirs, emsdkRoot);
   const common = options.rule.common ?? {};
+  const commonIncludeDirs =
+    common.includeDirs === undefined ? [includeDir] : common.includeDirs;
+  const importDirectories = await resolveImportDirectories(
+    rootDir,
+    ensureArray(options.imports)
+  );
+  const importIncludeDirs = importDirectories.includeDirs;
+  const importLibDirs = importDirectories.libDirs;
+  const linkLibDirs = dedupeValues([libDir, ...importLibDirs]);
+
+  logger.debug(`Detected rootDir: '${rootDir}'`);
+  logger.debug(`Detected srcDir: '${srcDir}'`);
+  logger.debug(`Detected outDir: '${outDir}'`);
+  logger.debug(`Detected libDir: '${libDir}'`);
+  logger.debug(`Detected buildDir: '${buildDir}'`);
+  logger.debug(`Detected buildId: '${buildId}'`);
+  logger.debug(`Detected buildRunDir: '${buildRunDir}'`);
+  logger.debug(`Detected cleanupBuildDir: ${cleanupBuildDir}`);
+  logger.debug(`Detected parallel: ${parallel}`);
+  logger.debug(`Detected emccCommand: '${emccCommand}'`);
+  logger.debug(
+    `Detected importIncludeDirs: [${importIncludeDirs.map((p) => `'${p}'`).join(',')}]`
+  );
+  logger.debug(
+    `Detected importLibDirs: [${importLibDirs.map((p) => `'${p}'`).join(',')}]`
+  );
 
   await ensureDirectory(outDir);
+  await ensureDirectory(libDir);
   await ensureDirectory(buildDir);
   await rm(buildRunDir, { recursive: true, force: true });
   await ensureDirectory(buildRunDir);
 
+  const hasArchiveTargets = targetEntries.some(
+    ([, target]) => resolveTargetType(target.type) === 'archive'
+  );
+  const emarCommand = hasArchiveTargets
+    ? await resolveEmarCommand(envWithDirs, emsdkRoot)
+    : undefined;
+  if (emarCommand) {
+    logger.debug(`Detected emarCommand: '${emarCommand}'`);
+  }
+
   const outFiles: Record<string, string> = {};
 
-  try {
-    for (const [targetName, target] of targets) {
-      const mergedLinkOptions = [
-        ...ensureArray(common.linkOptions),
-        ...ensureArray(target.linkOptions),
-      ];
-      const mergedExports = [
-        ...ensureArray(common.exports),
-        ...ensureArray(target.exports),
-      ];
+  const buildTargets = async (expectedType: WasmBuildTargetType) => {
+    for (const [targetName, target] of targetEntries) {
+      const targetType = resolveTargetType(target.type);
+      if (targetType !== expectedType) {
+        continue;
+      }
+      if (targetType === 'archive') {
+        if (target.linkOptions !== undefined) {
+          throw new Error(
+            `linkOptions is not supported for archive target: ${targetName}`
+          );
+        }
+        if (target.exports !== undefined) {
+          throw new Error(
+            `exports is not supported for archive target: ${targetName}`
+          );
+        }
+      }
+
+      const mergedLinkOptions =
+        targetType === 'archive'
+          ? []
+          : [
+              ...ensureArray(common.linkOptions),
+              ...ensureArray(target.linkOptions),
+            ];
+      const mergedExports =
+        targetType === 'archive'
+          ? []
+          : [...ensureArray(common.exports), ...ensureArray(target.exports)];
       const baseCompileOptions = [
         ...ensureArray(common.options),
         ...ensureArray(target.options),
       ];
       const baseIncludeDirs = [
-        ...ensureArray(common.includeDirs),
+        ...ensureArray(commonIncludeDirs),
         ...ensureArray(target.includeDirs),
+        ...importIncludeDirs,
       ];
       const baseDefines = mergeDefines(common.defines, target.defines);
       const sourceGroups = target.sourceGroups ?? [];
@@ -334,7 +551,8 @@ export const buildWasm = async (
         targetName,
         target.outFile,
         targetEnv,
-        outDir
+        targetType === 'archive' ? libDir : outDir,
+        targetType === 'archive' ? 'a' : 'wasm'
       );
 
       const sources = await resolveTargetSources(
@@ -373,12 +591,14 @@ export const buildWasm = async (
       await rm(targetBuildDir, { recursive: true, force: true });
       await ensureDirectory(targetBuildDir);
 
-      const resolvedLinkOptions = expandArray(
-        mergedLinkOptions,
-        targetEnv,
-        'linkOptions'
-      );
-      const resolvedExports = expandArray(mergedExports, targetEnv, 'exports');
+      const resolvedLinkOptions =
+        targetType === 'archive'
+          ? []
+          : expandArray(mergedLinkOptions, targetEnv, 'linkOptions');
+      const resolvedExports =
+        targetType === 'archive'
+          ? []
+          : expandArray(mergedExports, targetEnv, 'exports');
       const exportArgs = buildExportFlags(resolvedExports);
       const baseCompileArgs = buildCompileArgs(
         baseCompileOptions,
@@ -406,7 +626,8 @@ export const buildWasm = async (
         );
       });
 
-      logger.info(`Compiling target: ${targetName}`);
+      //--------------------------------------------------------
+
       const compileSource = async (
         source: string,
         args: CompileArgs,
@@ -423,6 +644,8 @@ export const buildWasm = async (
           ...args.includeArgs,
           ...args.defineArgs,
         ];
+        const sourcePath = relative(rootDir, source);
+        logger.info(`Compiling source: ${sourcePath} --> $tmp/${objectName}.o`);
         logger.debug(`emcc ${compileArgs.join(' ')}`);
         await runCommandWithEnv(
           emccCommand,
@@ -455,6 +678,7 @@ export const buildWasm = async (
         }
         return objectFiles;
       };
+
       const compileJobs: Array<{
         source: string;
         args: CompileArgs;
@@ -467,6 +691,13 @@ export const buildWasm = async (
           groupIndex: undefined,
         });
       }
+
+      logger.info(
+        parallel
+          ? `Building target: '${targetName}' [${compileJobs.length} files, in parallel]`
+          : `Building target: '${targetName}' [${compileJobs.length} files]`
+      );
+
       for (let index = 0; index < groupSources.length; index += 1) {
         const sourcesInGroup = groupSources[index];
         if (!sourcesInGroup) {
@@ -488,25 +719,49 @@ export const buildWasm = async (
           )
         : await buildObjectsSequential();
 
-      logger.info(`Linking target: ${targetName}`);
-      const linkArgs = [
-        ...objectFiles,
-        '-o',
-        resolvedOutFile,
-        ...resolvedLinkOptions,
-        ...exportArgs,
-      ];
-      logger.debug(`emcc ${linkArgs.join(' ')}`);
-      await runCommandWithEnv(
-        emccCommand,
-        linkArgs,
-        rootDir,
-        buildEnv,
-        emsdkOptions.signal
-      );
+      //--------------------------------------------------------
+
+      if (targetType === 'archive') {
+        if (!emarCommand) {
+          throw new Error('emar command is required for archive targets.');
+        }
+        logger.info(`Archiving target: ${targetName}.a`);
+        const archiveArgs = ['rcs', resolvedOutFile, ...objectFiles];
+        logger.debug(`emar ${archiveArgs.join(' ')}`);
+        await runCommandWithEnv(
+          emarCommand,
+          archiveArgs,
+          rootDir,
+          buildEnv,
+          emsdkOptions.signal
+        );
+      } else {
+        logger.info(`Linking target: ${targetName}.wasm`);
+        const linkArgs = [
+          ...objectFiles,
+          '-o',
+          resolvedOutFile,
+          ...linkLibDirs.map((dir) => `-L${dir}`),
+          ...resolvedLinkOptions,
+          ...exportArgs,
+        ];
+        logger.debug(`emcc ${linkArgs.join(' ')}`);
+        await runCommandWithEnv(
+          emccCommand,
+          linkArgs,
+          rootDir,
+          buildEnv,
+          emsdkOptions.signal
+        );
+      }
 
       outFiles[targetName] = resolvedOutFile;
     }
+  };
+
+  try {
+    await buildTargets('archive');
+    await buildTargets('wasm');
   } finally {
     if (cleanupBuildDir) {
       await rm(buildRunDir, { recursive: true, force: true });
