@@ -382,15 +382,15 @@ project/
 
 補足: 次節で解説する `imports` は、Nodeのモジュール解決（`require.resolve` 相当）でパッケージを解決します。
 そのため、パッケージ側に `main` / `exports` / `index.js` などの解決可能なエントリが必要です。
-ヘッダと `.a` だけを配布する場合は、空の `index.js` などを同梱してください。
-例えば、`package.json` を次のように定義して、空の `index.js` を含めます:
+ヘッダと `.a` だけを配布する場合は、空の `dummy.js` などを同梱してください。
+例えば、`package.json` を次のように定義して、空の `dummy.js` を含めます:
 
 ```json
 {
   "name": "wasm-calc-lib",
   "version": "1.0.0",
-  "main": "index.js",
-  "files": ["index.js", "include", "lib"]
+  "main": "dummy.js",
+  "files": ["dummy.js", "include", "lib"]
 }
 ```
 
@@ -474,9 +474,9 @@ export default defineConfig({
 `emsdk` に指定できる `PrepareEmsdkOptions` は以下の通りです。
 
 | キー            | 型            | デフォルト                                   | 説明                                           |
-| --------------- | ------------- | -------------------------------------------- | ---------------------------------------------- |
+| :-------------- | :------------ | :------------------------------------------- | :--------------------------------------------- |
 | `targetVersion` | `string`      | `'latest'`                                   | インストールする Emscripten SDK のバージョン。 |
-| `cacheDir`      | `string`      | `<OSのテンポラリ>/emsdk-env-cache`           | SDKキャッシュの保存先。                        |
+| `cacheDir`      | `string`      | `~/.cache/emsdk-env`                         | SDKキャッシュの保存先。                        |
 | `repoUrl`       | `string`      | `'https://github.com/emscripten-core/emsdk'` | emsdkリポジトリのURL。                         |
 | `gitPath`       | `string`      | `'git'`                                      | 使用する `git` 実行ファイル。                  |
 | `signal`        | `AbortSignal` | `undefined`                                  | 処理中断用シグナル。                           |

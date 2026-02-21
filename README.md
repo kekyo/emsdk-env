@@ -384,15 +384,15 @@ If you changed `includeDir` or `libDir`, add an `emsdk-env` key to `package.json
 
 Note: The `imports` explained in the next section resolve packages using Node's module resolution (equivalent to `require.resolve`).
 Therefore, the package must have resolvable entries such as `main`, `exports`, or `index.js`.
-When distributing only headers and `.a` files, include an empty `index.js` or similar.
-For example, define `package.json` as follows to include an empty `index.js`:
+When distributing only headers and `.a` files, include an empty `dummy.js` or similar.
+For example, define `package.json` as follows to include an empty `dummy.js`:
 
 ```json
 {
   "name": "wasm-calc-lib",
   "version": "1.0.0",
-  "main": "index.js",
-  "files": ["index.js", "include", "lib"]
+  "main": "dummy.js",
+  "files": ["dummy.js", "include", "lib"]
 }
 ```
 
@@ -476,9 +476,9 @@ The main keys available under `common` and `targets` are:
 `PrepareEmsdkOptions` supports:
 
 | Key             | Type          | Default                                      | Description                        |
-| --------------- | ------------- | -------------------------------------------- | ---------------------------------- |
+| :-------------- | :------------ | :------------------------------------------- | :--------------------------------- |
 | `targetVersion` | `string`      | `'latest'`                                   | Emscripten SDK version to install. |
-| `cacheDir`      | `string`      | `<OS temp>/emsdk-env-cache`                  | SDK cache location.                |
+| `cacheDir`      | `string`      | `~/.cache/emsdk-env`                         | SDK cache location.                |
 | `repoUrl`       | `string`      | `'https://github.com/emscripten-core/emsdk'` | emsdk repository URL.              |
 | `gitPath`       | `string`      | `'git'`                                      | `git` executable to use.           |
 | `signal`        | `AbortSignal` | `undefined`                                  | Abort signal for cancellation.     |
