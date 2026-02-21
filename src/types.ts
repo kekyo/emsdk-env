@@ -75,9 +75,9 @@ export interface WasmOptOptions {
    */
   readonly enable?: boolean;
   /**
-   * Additional wasm-opt arguments.
+   * Additional wasm-opt options.
    */
-  readonly args?: readonly string[];
+  readonly options?: readonly string[];
 }
 
 /**

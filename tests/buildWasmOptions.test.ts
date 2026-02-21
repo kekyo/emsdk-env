@@ -907,7 +907,7 @@ describe('buildWasm options', () => {
     }
   });
 
-  test('merges common and target wasmOpt args', async () => {
+  test('merges common and target wasmOpt options', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
     const wasmDir = join(projectRoot, 'wasm');
     await mkdir(wasmDir, { recursive: true });
@@ -923,14 +923,14 @@ describe('buildWasm options', () => {
         rule: {
           common: {
             wasmOpt: {
-              args: ['--strip-debug'],
+              options: ['--strip-debug'],
             },
           },
           targets: {
             app: {
               wasmOpt: {
                 enable: true,
-                args: ['--dce'],
+                options: ['--dce'],
               },
             },
           },
@@ -953,7 +953,7 @@ describe('buildWasm options', () => {
     }
   });
 
-  test('expands placeholders in wasmOpt args', async () => {
+  test('expands placeholders in wasmOpt options', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
     const wasmDir = join(projectRoot, 'wasm');
     await mkdir(wasmDir, { recursive: true });
@@ -969,7 +969,7 @@ describe('buildWasm options', () => {
         rule: {
           common: {
             wasmOpt: {
-              args: ['--tag={TARGET_NAME}'],
+              options: ['--tag={TARGET_NAME}'],
             },
           },
           targets: {

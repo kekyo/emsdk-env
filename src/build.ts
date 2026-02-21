@@ -101,10 +101,10 @@ const resolveWasmOptArgs = (
   target: WasmOptOptions | undefined,
   env: Record<string, string>
 ) => {
-  const commonArgs = common?.args ?? DEFAULT_WASM_OPT_ARGS;
-  const targetArgs = target?.args ?? [];
+  const commonArgs = common?.options ?? DEFAULT_WASM_OPT_ARGS;
+  const targetArgs = target?.options ?? [];
   const mergedArgs = [...commonArgs, ...targetArgs];
-  return expandArray(mergedArgs, env, 'wasmOpt.args');
+  return expandArray(mergedArgs, env, 'wasmOpt.options');
 };
 
 const stripOuterQuotes = (value: string) => {
