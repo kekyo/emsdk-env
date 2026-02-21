@@ -3,13 +3,18 @@
 // Under MIT.
 // https://github.com/kekyo/emsdk-env
 
-import { readFile, rm } from 'fs/promises';
+import { readFile, rename, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { glob } from 'glob';
 import { dirname, isAbsolute, join, relative, resolve } from 'path';
 
 import { runCommandWithEnv } from './commands';
-import { loadEmsdkEnv, resolveEmarCommand, resolveEmccCommand } from './env';
+import {
+  loadEmsdkEnv,
+  resolveEmarCommand,
+  resolveEmccCommand,
+  resolveWasmOptCommand,
+} from './env';
 import { prepareEmsdk } from './emsdk';
 import { ensureDirectory, pathExists } from './fs-utils';
 import { createConsoleLogger } from './logger';
@@ -18,6 +23,7 @@ import type {
   BuildWasmResult,
   DefineValue,
   PrepareEmsdkOptions,
+  WasmOptOptions,
   WasmBuildTargetType,
 } from './types';
 
@@ -31,6 +37,7 @@ const DEFAULT_IMPORT_INCLUDE_DIR = 'include';
 const DEFAULT_IMPORT_LIB_DIR = 'lib';
 const DEFAULT_WASM_BUILD_DIR = join(tmpdir(), 'emsdk-env');
 const DEFAULT_EMSDK_TARGET_VERSION = 'latest';
+const DEFAULT_WASM_OPT_ARGS = ['-Oz'];
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -78,6 +85,22 @@ const mergeDefines = (
   ...(common ?? {}),
   ...(target ?? {}),
 });
+
+const resolveWasmOptEnabled = (
+  common: WasmOptOptions | undefined,
+  target: WasmOptOptions | undefined
+) => target?.enable ?? common?.enable ?? false;
+
+const resolveWasmOptArgs = (
+  common: WasmOptOptions | undefined,
+  target: WasmOptOptions | undefined,
+  env: Record<string, string>
+) => {
+  const commonArgs = common?.args ?? DEFAULT_WASM_OPT_ARGS;
+  const targetArgs = target?.args ?? [];
+  const mergedArgs = [...commonArgs, ...targetArgs];
+  return expandArray(mergedArgs, env, 'wasmOpt.args');
+};
 
 const resolvePath = (rootDir: string, value: string) =>
   isAbsolute(value) ? value : resolve(rootDir, value);
@@ -506,6 +529,15 @@ export const buildWasm = async (
   if (emarCommand) {
     logger.debug(`Detected emarCommand: '${emarCommand}'`);
   }
+  let wasmOptCommand: string | undefined;
+  const getWasmOptCommand = async () => {
+    if (wasmOptCommand) {
+      return wasmOptCommand;
+    }
+    wasmOptCommand = await resolveWasmOptCommand(envWithDirs, emsdkRoot);
+    logger.debug(`Detected wasmOptCommand: '${wasmOptCommand}'`);
+    return wasmOptCommand;
+  };
 
   const outFiles: Record<string, string> = {};
 
@@ -526,6 +558,11 @@ export const buildWasm = async (
             `exports is not supported for archive target: ${targetName}`
           );
         }
+        if (target.wasmOpt !== undefined) {
+          throw new Error(
+            `wasmOpt is not supported for archive target: ${targetName}`
+          );
+        }
       }
 
       const mergedLinkOptions =
@@ -539,6 +576,10 @@ export const buildWasm = async (
         targetType === 'archive'
           ? []
           : [...ensureArray(common.exports), ...ensureArray(target.exports)];
+      const wasmOptEnabled =
+        targetType === 'archive'
+          ? false
+          : resolveWasmOptEnabled(common.wasmOpt, target.wasmOpt);
       const baseCompileOptions = [
         ...ensureArray(common.options),
         ...ensureArray(target.options),
@@ -610,6 +651,9 @@ export const buildWasm = async (
           ? []
           : expandArray(mergedExports, targetEnv, 'exports');
       const exportArgs = buildExportFlags(resolvedExports);
+      const resolvedWasmOptArgs = wasmOptEnabled
+        ? resolveWasmOptArgs(common.wasmOpt, target.wasmOpt, targetEnv)
+        : [];
       const baseCompileArgs = buildCompileArgs(
         baseCompileOptions,
         baseIncludeDirs,
@@ -771,6 +815,27 @@ export const buildWasm = async (
           buildEnv,
           emsdkOptions.signal
         );
+        if (wasmOptEnabled) {
+          const tempOutFile = `${resolvedOutFile}.opt`;
+          const wasmOptArgs = [
+            resolvedOutFile,
+            '-o',
+            tempOutFile,
+            ...resolvedWasmOptArgs,
+          ];
+          const wasmOptCommand = await getWasmOptCommand();
+          logger.info(`Optimizing target: ${targetName}.wasm`);
+          logger.debug(`wasm-opt ${wasmOptArgs.join(' ')}`);
+          await runCommandWithEnv(
+            wasmOptCommand,
+            wasmOptArgs,
+            rootDir,
+            buildEnv,
+            emsdkOptions.signal
+          );
+          await rm(resolvedOutFile, { force: true });
+          await rename(tempOutFile, resolvedOutFile);
+        }
       }
 
       outFiles[targetName] = resolvedOutFile;

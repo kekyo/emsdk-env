@@ -67,6 +67,20 @@ export interface PrepareEmsdkOptions {
 export type DefineValue = string | number | boolean;
 
 /**
+ * Options for running wasm-opt on the linked output.
+ */
+export interface WasmOptOptions {
+  /**
+   * Enable wasm-opt for this target (defaults to false).
+   */
+  readonly enable?: boolean;
+  /**
+   * Additional wasm-opt arguments.
+   */
+  readonly args?: readonly string[];
+}
+
+/**
  * Build target type for WASM or archive outputs.
  */
 export type WasmBuildTargetType = 'wasm' | 'archive';
@@ -87,6 +101,10 @@ export interface WasmBuildCommonOptions {
    * Common symbols to export (mapped to `-s EXPORTED_FUNCTIONS=...`).
    */
   readonly exports?: readonly string[];
+  /**
+   * Common wasm-opt options applied after linking.
+   */
+  readonly wasmOpt?: WasmOptOptions;
   /**
    * Common include directories added as `-I` flags (defaults to `$includeDir`).
    */
@@ -129,6 +147,10 @@ export interface WasmBuildTarget {
    * Common symbols to export (mapped to `-s EXPORTED_FUNCTIONS=...`).
    */
   readonly exports?: readonly string[];
+  /**
+   * wasm-opt options applied after linking this target.
+   */
+  readonly wasmOpt?: WasmOptOptions;
   /**
    * Include directories added as `-I` flags.
    */

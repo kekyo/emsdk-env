@@ -33,6 +33,7 @@ vi.mock('../src/env', () => ({
   loadEmsdkEnv: vi.fn().mockResolvedValue({}),
   resolveEmccCommand: vi.fn().mockResolvedValue('emcc'),
   resolveEmarCommand: vi.fn().mockResolvedValue('emar'),
+  resolveWasmOptCommand: vi.fn().mockResolvedValue('wasm-opt'),
 }));
 
 vi.mock('../src/commands', () => ({
@@ -468,6 +469,34 @@ describe('buildWasm options', () => {
     }
   });
 
+  test('rejects wasmOpt for archive target', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
+    const wasmDir = join(projectRoot, 'wasm');
+    await mkdir(wasmDir, { recursive: true });
+    await writeFile(join(wasmDir, 'alpha.c'), 'int alpha() { return 1; }');
+
+    try {
+      await expect(
+        buildWasm({
+          root: projectRoot,
+          buildDir: join(projectRoot, '.wasm-build'),
+          rule: {
+            targets: {
+              libalpha: {
+                type: 'archive',
+                wasmOpt: {
+                  enable: true,
+                },
+              },
+            },
+          },
+        })
+      ).rejects.toThrow('wasmOpt is not supported for archive target');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   test('ignores common linkOptions and exports for archive targets', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
     const wasmDir = join(projectRoot, 'wasm');
@@ -496,6 +525,176 @@ describe('buildWasm options', () => {
         resolve(projectRoot, 'lib', 'libalpha.a')
       );
     } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('runs wasm-opt with default args when enabled', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
+    const wasmDir = join(projectRoot, 'wasm');
+    await mkdir(wasmDir, { recursive: true });
+    await writeFile(join(wasmDir, 'alpha.c'), 'int alpha() { return 1; }');
+
+    const runCommandMock = vi.mocked(runCommandWithEnv);
+    runCommandMock.mockClear();
+
+    try {
+      await buildWasm({
+        root: projectRoot,
+        buildDir: join(projectRoot, '.wasm-build'),
+        rule: {
+          targets: {
+            app: {
+              wasmOpt: {
+                enable: true,
+              },
+            },
+          },
+        },
+      });
+
+      const wasmOptCalls = runCommandMock.mock.calls.filter(
+        (call) => call[0] === 'wasm-opt'
+      );
+      expect(wasmOptCalls.length).toBe(1);
+      const wasmOptArgs = wasmOptCalls[0]?.[1] as string[] | undefined;
+      expect(wasmOptArgs).toBeTruthy();
+      const outFile = resolve(projectRoot, 'src/wasm/app.wasm');
+      expect(wasmOptArgs?.[0]).toBe(outFile);
+      expect(wasmOptArgs).toContain('-o');
+      expect(wasmOptArgs).toContain(`${outFile}.opt`);
+      expect(wasmOptArgs).toContain('-Oz');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('merges common and target wasmOpt args', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
+    const wasmDir = join(projectRoot, 'wasm');
+    await mkdir(wasmDir, { recursive: true });
+    await writeFile(join(wasmDir, 'alpha.c'), 'int alpha() { return 1; }');
+
+    const runCommandMock = vi.mocked(runCommandWithEnv);
+    runCommandMock.mockClear();
+
+    try {
+      await buildWasm({
+        root: projectRoot,
+        buildDir: join(projectRoot, '.wasm-build'),
+        rule: {
+          common: {
+            wasmOpt: {
+              args: ['--strip-debug'],
+            },
+          },
+          targets: {
+            app: {
+              wasmOpt: {
+                enable: true,
+                args: ['--dce'],
+              },
+            },
+          },
+        },
+      });
+
+      const wasmOptCalls = runCommandMock.mock.calls.filter(
+        (call) => call[0] === 'wasm-opt'
+      );
+      expect(wasmOptCalls.length).toBe(1);
+      const wasmOptArgs = wasmOptCalls[0]?.[1] as string[] | undefined;
+      expect(wasmOptArgs).toBeTruthy();
+      const stripIndex = wasmOptArgs?.indexOf('--strip-debug') ?? -1;
+      const dceIndex = wasmOptArgs?.indexOf('--dce') ?? -1;
+      expect(stripIndex).toBeGreaterThan(-1);
+      expect(dceIndex).toBeGreaterThan(-1);
+      expect(stripIndex).toBeLessThan(dceIndex);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('expands placeholders in wasmOpt args', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
+    const wasmDir = join(projectRoot, 'wasm');
+    await mkdir(wasmDir, { recursive: true });
+    await writeFile(join(wasmDir, 'alpha.c'), 'int alpha() { return 1; }');
+
+    const runCommandMock = vi.mocked(runCommandWithEnv);
+    runCommandMock.mockClear();
+
+    try {
+      await buildWasm({
+        root: projectRoot,
+        buildDir: join(projectRoot, '.wasm-build'),
+        rule: {
+          common: {
+            wasmOpt: {
+              args: ['--tag={TARGET_NAME}'],
+            },
+          },
+          targets: {
+            app: {
+              wasmOpt: {
+                enable: true,
+              },
+            },
+          },
+        },
+      });
+
+      const wasmOptCalls = runCommandMock.mock.calls.filter(
+        (call) => call[0] === 'wasm-opt'
+      );
+      expect(wasmOptCalls.length).toBe(1);
+      const wasmOptArgs = wasmOptCalls[0]?.[1] as string[] | undefined;
+      expect(wasmOptArgs).toContain('--tag=app');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('propagates wasm-opt failure', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
+    const wasmDir = join(projectRoot, 'wasm');
+    await mkdir(wasmDir, { recursive: true });
+    await writeFile(join(wasmDir, 'alpha.c'), 'int alpha() { return 1; }');
+
+    const runCommandMock = vi.mocked(runCommandWithEnv);
+    const originalImplementation = runCommandMock.getMockImplementation();
+    runCommandMock.mockImplementation(
+      async (command, args, cwd, env, signal) => {
+        if (command === 'wasm-opt') {
+          throw new Error('wasm-opt failed');
+        }
+        if (!originalImplementation) {
+          return;
+        }
+        return originalImplementation(command, args, cwd, env, signal);
+      }
+    );
+
+    try {
+      await expect(
+        buildWasm({
+          root: projectRoot,
+          buildDir: join(projectRoot, '.wasm-build'),
+          rule: {
+            targets: {
+              app: {
+                wasmOpt: {
+                  enable: true,
+                },
+              },
+            },
+          },
+        })
+      ).rejects.toThrow('wasm-opt failed');
+    } finally {
+      if (originalImplementation) {
+        runCommandMock.mockImplementation(originalImplementation);
+      }
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
