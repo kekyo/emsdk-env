@@ -459,17 +459,18 @@ export default defineConfig({
 
 `common` と `targets` 内で使える主なキーは以下です。
 
-| キー           | 型                            | デフォルト                     | 説明                                                                         |
-| :------------- | :---------------------------- | :----------------------------- | :--------------------------------------------------------------------------- |
-| `type`         | `'wasm' \| 'archive'`         | `'wasm'`                       | 出力形式。`archive` は `.a` を生成。                                         |
-| `outFile`      | `string`                      | `<target>.wasm` / `<target>.a` | 出力ファイル名（`outDir` / `libDir` 相対）。                                 |
-| `sources`      | `string[]`                    | `['**/*.c', '**/*.cpp']`       | 対象ソース（`srcDir` 相対）。                                                |
-| `sourceGroups` | `WasmBuildSourceGroup[]`      | `[]`                           | 追加オプション付きのソースグループ。                                         |
-| `options`      | `string[]`                    | `[]`                           | `emcc -c` に渡す追加オプション。                                             |
-| `linkOptions`  | `string[]`                    | `[]`                           | リンク時の追加オプション。`archive` では使用不可。                           |
-| `exports`      | `string[]`                    | `[]`                           | `-s EXPORTED_FUNCTIONS=...` で指定するエクスポート。`archive` では使用不可。 |
-| `includeDirs`  | `string[]`                    | `[]`                           | `-I` を追加するインクルードディレクトリ。                                    |
-| `defines`      | `Record<string, DefineValue>` | `{}`                           | `-D` を追加するマクロ定義。                                                  |
+| キー           | 型                            | デフォルト                     | 説明                                                                                            |
+| :------------- | :---------------------------- | :----------------------------- | :---------------------------------------------------------------------------------------------- |
+| `type`         | `'wasm' \| 'archive'`         | `'wasm'`                       | 出力形式。`archive` は `.a` を生成。                                                            |
+| `outFile`      | `string`                      | `<target>.wasm` / `<target>.a` | 出力ファイル名（`outDir` / `libDir` 相対）。                                                    |
+| `sources`      | `string[]`                    | `['**/*.c', '**/*.cpp']`       | 対象ソース（`srcDir` 相対）。                                                                   |
+| `sourceGroups` | `WasmBuildSourceGroup[]`      | `[]`                           | 追加オプション付きのソースグループ。                                                            |
+| `options`      | `string[]`                    | `[]`                           | `emcc -c` に渡す追加オプション。                                                                |
+| `linkOptions`  | `string[]`                    | `[]`                           | リンク時の追加オプション。`archive` では使用不可。                                              |
+| `exports`      | `string[]`                    | `[]`                           | `-s EXPORTED_FUNCTIONS=...` で指定するエクスポート。`archive` では使用不可。                    |
+| `wasmOpt`      | `WasmOptOptions`              | `undefined`                    | wasm-opt の設定（enableのデフォルトは無効、commonのargsは `['-Oz']`）。`archive` では使用不可。 |
+| `includeDirs`  | `string[]`                    | `[]`                           | `-I` を追加するインクルードディレクトリ。                                                       |
+| `defines`      | `Record<string, DefineValue>` | `{}`                           | `-D` を追加するマクロ定義。                                                                     |
 
 `emsdk` に指定できる `PrepareEmsdkOptions` は以下の通りです。
 

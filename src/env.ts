@@ -98,3 +98,24 @@ export const resolveEmarCommand = async (
   }
   return 'emar';
 };
+
+export const resolveWasmOptCommand = async (
+  env: Record<string, string>,
+  emsdkRoot: string
+) => {
+  if (env.WASM_OPT) {
+    return env.WASM_OPT;
+  }
+  const binaryenRoot = env.BINARYEN_ROOT ?? env.BINARYEN;
+  if (binaryenRoot) {
+    const candidate = join(binaryenRoot, 'bin', 'wasm-opt');
+    if (await pathExists(candidate)) {
+      return candidate;
+    }
+  }
+  const fallback = join(emsdkRoot, 'upstream', 'bin', 'wasm-opt');
+  if (await pathExists(fallback)) {
+    return fallback;
+  }
+  return 'wasm-opt';
+};
