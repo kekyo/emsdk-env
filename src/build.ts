@@ -86,6 +86,11 @@ const mergeDefines = (
   ...(target ?? {}),
 });
 
+const mergeLinkDirectives = (
+  common?: Record<string, DefineValue>,
+  target?: Record<string, DefineValue>
+) => mergeDefines(common, target);
+
 const resolveWasmOptEnabled = (
   common: WasmOptOptions | undefined,
   target: WasmOptOptions | undefined
@@ -208,6 +213,21 @@ const resolveDefines = (
   return resolved;
 };
 
+const resolveLinkDirectives = (
+  directives: Record<string, DefineValue>,
+  env: Record<string, string>
+) => {
+  const resolved: Record<string, DefineValue> = {};
+  for (const [key, value] of Object.entries(directives)) {
+    if (typeof value === 'string') {
+      resolved[key] = expandPlaceholders(value, env, `linkDirectives.${key}`);
+    } else {
+      resolved[key] = value;
+    }
+  }
+  return resolved;
+};
+
 const resolveIncludeDirs = (
   includeDirs: readonly string[],
   env: Record<string, string>,
@@ -244,6 +264,16 @@ const resolveSourcesFromPatterns = async (
 
 const buildDefineFlags = (defines: Record<string, DefineValue>) =>
   Object.entries(defines).map(([key, value]) => `-D${key}=${String(value)}`);
+
+const buildLinkDirectiveFlags = (directives: Record<string, DefineValue>) => {
+  if (Object.keys(directives).length === 0) {
+    return [];
+  }
+  return Object.entries(directives).flatMap(([key, value]) => [
+    '-s',
+    `${key}=${String(value)}`,
+  ]);
+};
 
 const buildExportFlags = (exports: readonly string[]) => {
   if (exports.length === 0) {
@@ -622,6 +652,11 @@ export const buildWasm = async (
             `linkOptions is not supported for archive target: ${targetName}`
           );
         }
+        if (target.linkDirectives !== undefined) {
+          throw new Error(
+            `linkDirectives is not supported for archive target: ${targetName}`
+          );
+        }
         if (target.exports !== undefined) {
           throw new Error(
             `exports is not supported for archive target: ${targetName}`
@@ -641,6 +676,10 @@ export const buildWasm = async (
               ...ensureArray(common.linkOptions),
               ...ensureArray(target.linkOptions),
             ];
+      const mergedLinkDirectives =
+        targetType === 'archive'
+          ? {}
+          : mergeLinkDirectives(common.linkDirectives, target.linkDirectives);
       const mergedExports =
         targetType === 'archive'
           ? []
@@ -711,10 +750,18 @@ export const buildWasm = async (
       await rm(targetBuildDir, { recursive: true, force: true });
       await ensureDirectory(targetBuildDir);
 
+      const resolvedLinkDirectives =
+        targetType === 'archive'
+          ? {}
+          : resolveLinkDirectives(mergedLinkDirectives, targetEnv);
+      const linkDirectiveArgs = buildLinkDirectiveFlags(resolvedLinkDirectives);
       const resolvedLinkOptions =
         targetType === 'archive'
           ? []
-          : expandArray(mergedLinkOptions, targetEnv, 'linkOptions');
+          : [
+              ...linkDirectiveArgs,
+              ...expandArray(mergedLinkOptions, targetEnv, 'linkOptions'),
+            ];
       const resolvedExports =
         targetType === 'archive'
           ? []

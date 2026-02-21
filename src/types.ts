@@ -98,6 +98,10 @@ export interface WasmBuildCommonOptions {
    */
   readonly linkOptions?: readonly string[];
   /**
+   * Common linker directives mapped to `-s KEY=VALUE`.
+   */
+  readonly linkDirectives?: Record<string, DefineValue>;
+  /**
    * Common symbols to export (mapped to `-s EXPORTED_FUNCTIONS=...`).
    */
   readonly exports?: readonly string[];
@@ -143,6 +147,10 @@ export interface WasmBuildTarget {
    * Additional link options passed to `emcc` during the final link step.
    */
   readonly linkOptions?: readonly string[];
+  /**
+   * Linker directives mapped to `-s KEY=VALUE`.
+   */
+  readonly linkDirectives?: Record<string, DefineValue>;
   /**
    * Common symbols to export (mapped to `-s EXPORTED_FUNCTIONS=...`).
    */
