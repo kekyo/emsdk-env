@@ -185,6 +185,7 @@ describe('buildWasm', () => {
         root: projectRoot,
         buildDir: buildRoot,
         cleanupBuildDir: false,
+        parallel: false,
         rule: {
           common: {
             options: ['-g'],
@@ -199,15 +200,19 @@ describe('buildWasm', () => {
               outFile: '{OUT_DIR}/custom.wasm',
               sources: ['alpha.c'],
               options: ['-O3'],
-              linkOptions: ['-s', 'ALLOW_MEMORY_GROWTH=1'],
               exports: ['_target1'],
               includeDirs: ['include'],
               defines: {
                 SIMD_ENABLED: '1',
               },
+              linkDirectives: {
+                ALLOW_MEMORY_GROWTH: 1,
+              },
             },
             target2: {
-              linkOptions: ['-s', 'ALLOW_MEMORY_GROWTH=1'],
+              linkDirectives: {
+                ALLOW_MEMORY_GROWTH: 1,
+              },
             },
           },
         },

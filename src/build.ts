@@ -6,7 +6,7 @@
 import { readFile, rename, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { glob } from 'glob';
-import { dirname, isAbsolute, join, relative, resolve } from 'path';
+import { dirname, isAbsolute, join, parse, relative, resolve } from 'path';
 
 import { runCommandWithEnv } from './commands';
 import {
@@ -22,6 +22,7 @@ import type {
   BuildWasmOptions,
   BuildWasmResult,
   DefineValue,
+  KeyValueInput,
   PrepareEmsdkOptions,
   WasmOptOptions,
   WasmBuildTargetType,
@@ -78,13 +79,50 @@ const normalizePrepareOptions = (
   };
 };
 
+const parseKeyValueInput = (values: readonly string[]) => {
+  const parsed: Record<string, DefineValue> = {};
+  for (const entry of values) {
+    const index = entry.indexOf('=');
+    if (index === -1) {
+      parsed[entry] = undefined;
+      continue;
+    }
+    const key = entry.slice(0, index);
+    const value = entry.slice(index + 1);
+    parsed[key] = value;
+  }
+  return parsed;
+};
+
+const isKeyValueMap = (
+  value: KeyValueInput
+): value is Readonly<Map<string, DefineValue>> => value instanceof Map;
+
+const normalizeKeyValueInput = (
+  input: KeyValueInput | undefined
+): Record<string, DefineValue> => {
+  if (!input) {
+    return {};
+  }
+  if (Array.isArray(input)) {
+    return parseKeyValueInput(input);
+  }
+  if (isKeyValueMap(input)) {
+    return Object.fromEntries(input);
+  }
+  return { ...(input as Record<string, DefineValue>) };
+};
+
 const mergeDefines = (
-  common?: Record<string, DefineValue>,
-  target?: Record<string, DefineValue>
-) => ({
-  ...(common ?? {}),
-  ...(target ?? {}),
+  common?: KeyValueInput,
+  target?: KeyValueInput
+): Record<string, DefineValue> => ({
+  ...normalizeKeyValueInput(common),
+  ...normalizeKeyValueInput(target),
 });
+
+const mergeLinkDirectives = (common?: KeyValueInput, target?: KeyValueInput) =>
+  mergeDefines(common, target);
 
 const resolveWasmOptEnabled = (
   common: WasmOptOptions | undefined,
@@ -96,10 +134,79 @@ const resolveWasmOptArgs = (
   target: WasmOptOptions | undefined,
   env: Record<string, string>
 ) => {
-  const commonArgs = common?.args ?? DEFAULT_WASM_OPT_ARGS;
-  const targetArgs = target?.args ?? [];
+  const commonArgs = common?.options ?? DEFAULT_WASM_OPT_ARGS;
+  const targetArgs = target?.options ?? [];
   const mergedArgs = [...commonArgs, ...targetArgs];
-  return expandArray(mergedArgs, env, 'wasmOpt.args');
+  return expandArray(mergedArgs, env, 'wasmOpt.options');
+};
+
+const stripOuterQuotes = (value: string) => {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+};
+
+const extractWasmBinaryFile = (value: string) => {
+  if (value.startsWith('WASM_BINARY_FILE=')) {
+    return value.slice('WASM_BINARY_FILE='.length);
+  }
+  const match = value.match(/^(?:-s|--settings)(?:=)?WASM_BINARY_FILE=(.+)$/);
+  if (match) {
+    return match[1];
+  }
+  return undefined;
+};
+
+const resolveWasmBinaryFileFromLinkOptions = (
+  linkOptions: readonly string[]
+) => {
+  for (let index = 0; index < linkOptions.length; index += 1) {
+    const option = linkOptions[index];
+    if (!option) {
+      continue;
+    }
+    if (option === '-s' || option === '--settings') {
+      const next = linkOptions[index + 1];
+      if (!next) {
+        continue;
+      }
+      const extracted = extractWasmBinaryFile(next);
+      if (extracted) {
+        return stripOuterQuotes(extracted);
+      }
+    }
+    const extracted = extractWasmBinaryFile(option);
+    if (extracted) {
+      return stripOuterQuotes(extracted);
+    }
+  }
+  return undefined;
+};
+
+const resolveWasmOptInputFile = (
+  resolvedOutFile: string,
+  resolvedLinkOptions: readonly string[]
+) => {
+  const wasmBinaryFile =
+    resolveWasmBinaryFileFromLinkOptions(resolvedLinkOptions);
+  if (wasmBinaryFile) {
+    return isAbsolute(wasmBinaryFile)
+      ? wasmBinaryFile
+      : resolve(dirname(resolvedOutFile), wasmBinaryFile);
+  }
+  const parsed = parse(resolvedOutFile);
+  if (parsed.ext.toLowerCase() === '.wasm') {
+    return resolvedOutFile;
+  }
+  const baseName = parsed.name.toLowerCase().endsWith('.wasm')
+    ? parsed.name
+    : `${parsed.name}.wasm`;
+  return join(parsed.dir, baseName);
 };
 
 const resolvePath = (rootDir: string, value: string) =>
@@ -132,6 +239,21 @@ const resolveDefines = (
   for (const [key, value] of Object.entries(defines)) {
     if (typeof value === 'string') {
       resolved[key] = expandPlaceholders(value, env, `defines.${key}`);
+    } else {
+      resolved[key] = value;
+    }
+  }
+  return resolved;
+};
+
+const resolveLinkDirectives = (
+  directives: Record<string, DefineValue>,
+  env: Record<string, string>
+) => {
+  const resolved: Record<string, DefineValue> = {};
+  for (const [key, value] of Object.entries(directives)) {
+    if (typeof value === 'string') {
+      resolved[key] = expandPlaceholders(value, env, `linkDirectives.${key}`);
     } else {
       resolved[key] = value;
     }
@@ -174,7 +296,22 @@ const resolveSourcesFromPatterns = async (
 };
 
 const buildDefineFlags = (defines: Record<string, DefineValue>) =>
-  Object.entries(defines).map(([key, value]) => `-D${key}=${String(value)}`);
+  Object.entries(defines).flatMap(([key, value]) =>
+    value === null || value === undefined
+      ? [`-D${key}`]
+      : [`-D${key}=${String(value)}`]
+  );
+
+const buildLinkDirectiveFlags = (directives: Record<string, DefineValue>) => {
+  if (Object.keys(directives).length === 0) {
+    return [];
+  }
+  return Object.entries(directives).flatMap(([key, value]) =>
+    value === null || value === undefined
+      ? ['-s', key]
+      : ['-s', `${key}=${String(value)}`]
+  );
+};
 
 const buildExportFlags = (exports: readonly string[]) => {
   if (exports.length === 0) {
@@ -553,6 +690,11 @@ export const buildWasm = async (
             `linkOptions is not supported for archive target: ${targetName}`
           );
         }
+        if (target.linkDirectives !== undefined) {
+          throw new Error(
+            `linkDirectives is not supported for archive target: ${targetName}`
+          );
+        }
         if (target.exports !== undefined) {
           throw new Error(
             `exports is not supported for archive target: ${targetName}`
@@ -572,6 +714,10 @@ export const buildWasm = async (
               ...ensureArray(common.linkOptions),
               ...ensureArray(target.linkOptions),
             ];
+      const mergedLinkDirectives =
+        targetType === 'archive'
+          ? {}
+          : mergeLinkDirectives(common.linkDirectives, target.linkDirectives);
       const mergedExports =
         targetType === 'archive'
           ? []
@@ -642,10 +788,18 @@ export const buildWasm = async (
       await rm(targetBuildDir, { recursive: true, force: true });
       await ensureDirectory(targetBuildDir);
 
+      const resolvedLinkDirectives =
+        targetType === 'archive'
+          ? {}
+          : resolveLinkDirectives(mergedLinkDirectives, targetEnv);
+      const linkDirectiveArgs = buildLinkDirectiveFlags(resolvedLinkDirectives);
       const resolvedLinkOptions =
         targetType === 'archive'
           ? []
-          : expandArray(mergedLinkOptions, targetEnv, 'linkOptions');
+          : [
+              ...linkDirectiveArgs,
+              ...expandArray(mergedLinkOptions, targetEnv, 'linkOptions'),
+            ];
       const resolvedExports =
         targetType === 'archive'
           ? []
@@ -670,7 +824,7 @@ export const buildWasm = async (
           ...baseIncludeDirs,
           ...ensureArray(group?.includeDirs),
         ];
-        const groupDefines = mergeDefines(baseDefines, group?.defines ?? {});
+        const groupDefines = mergeDefines(baseDefines, group?.defines);
         return buildCompileArgs(
           groupOptions,
           groupIncludeDirs,
@@ -816,9 +970,18 @@ export const buildWasm = async (
           emsdkOptions.signal
         );
         if (wasmOptEnabled) {
-          const tempOutFile = `${resolvedOutFile}.opt`;
-          const wasmOptArgs = [
+          const wasmOptInput = resolveWasmOptInputFile(
             resolvedOutFile,
+            resolvedLinkOptions
+          );
+          if (!(await pathExists(wasmOptInput))) {
+            throw new Error(
+              `wasm-opt enabled but wasm binary not found: ${wasmOptInput}`
+            );
+          }
+          const tempOutFile = `${wasmOptInput}.opt`;
+          const wasmOptArgs = [
+            wasmOptInput,
             '-o',
             tempOutFile,
             ...resolvedWasmOptArgs,
@@ -833,8 +996,8 @@ export const buildWasm = async (
             buildEnv,
             emsdkOptions.signal
           );
-          await rm(resolvedOutFile, { force: true });
-          await rename(tempOutFile, resolvedOutFile);
+          await rm(wasmOptInput, { force: true });
+          await rename(tempOutFile, wasmOptInput);
         }
       }
 

@@ -12,7 +12,8 @@ export default defineConfig({
       targets: {
         add: {
           options: ['-O3', '-std=c99'],
-          linkOptions: ['-s', 'STANDALONE_WASM=1', '--no-entry'],
+          linkOptions: ['--no-entry'],
+          linkDirectives: { STANDALONE_WASM: 1 },
           exports: ['_add'],
         },
       },

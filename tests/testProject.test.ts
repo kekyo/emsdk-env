@@ -70,7 +70,8 @@ export default defineConfig({
     emsdkEnv({
       common: {
         options: ['-O3', '-std=c99'],
-        linkOptions: ['-s', 'STANDALONE_WASM=1', '--no-entry'],
+        linkOptions: ['--no-entry'],
+        linkDirectives: { STANDALONE_WASM: 1, },
       },
       targets: {
         add: {
