@@ -38,7 +38,9 @@ export default defineConfig({
           // Compiler options
           options: ['-O3', '-std=c99'],
           // Linker options
-          linkOptions: ['-s', 'STANDALONE_WASM=1', '--no-entry'],
+          linkOptions: ['--no-entry'],
+          // Linker directives
+          linkDirectives: { STANDALONE_WASM: 1 },
           // Exported symbols
           exports: ['_add'],
         },
@@ -442,6 +444,40 @@ Others:
 - When using yarn, files inside the package may not be accessible by default.
   Use `nodeLinker: node-modules` or mark the target package as unplugged so it is materialized.
 
+## Additional Optimization with wasm-opt
+
+“wasm-opt” is a utility included in the Emscripten SDK that performs additional optimizations.
+It is implemented by [Binaryen](https://github.com/WebAssembly/binaryen).
+
+It takes a WASM binary as input and outputs a new, optimized WASM binary.
+
+emsdk-env can use wasm-opt to perform additional optimizations on the link result:
+
+```typescript
+export default defineConfig({
+  plugins: [
+    emsdkEnv({
+      targets: {
+        // “offload.wasm”
+        offload: {
+          // Execute additional optimizations using wasm-opt
+          wasmOpt: {
+            enable: true,
+            args: [‘-Oz’, ‘--enable-simd’],
+          },
+
+          //  :
+          //  :
+        },
+      },
+    }),
+  ],
+});
+```
+
+`wasmOpt.enable` is `false` by default. Therefore, explicitly set it to `true` when using wasm-opt.
+Using this, you can specify only `wasmOpt.args` in `common` and control whether to apply wasm-opt for each target via `wasmOpt.enable`.
+
 ## Vite Options
 
 The options accepted by `emsdk-env/vite` (`EmsdkVitePluginOptions`) are:
@@ -469,11 +505,11 @@ The main keys available under `common` and `targets` are:
 | `sourceGroups`   | `WasmBuildSourceGroup[]`      | `[]`                           | Source groups with additional options.                                                                                                                                                                                                                                       |
 | `options`        | `string[]`                    | `[]`                           | Extra options passed to `emcc -c`.                                                                                                                                                                                                                                           |
 | `linkOptions`    | `string[]`                    | `[]`                           | Extra linker options. Not available for `archive`.                                                                                                                                                                                                                           |
-| `linkDirectives` | `Record<string, DefineValue>` | `{}`                           | Linker directives mapped to `-s KEY=VALUE`. Not available for `archive`.                                                                                                                                                                                                     |
+| `linkDirectives` | `Record<string, DefineValue>` | `{}`                           | Linker directives mapped to `-s KEY=VALUE`. Use `null`/`undefined` to emit `-s KEY`. Not available for `archive`.                                                                                                                                                            |
 | `exports`        | `string[]`                    | `[]`                           | Exports passed via `-s EXPORTED_FUNCTIONS=...`. Not available for `archive`.                                                                                                                                                                                                 |
 | `wasmOpt`        | `WasmOptOptions`              | `undefined`                    | wasm-opt options (enable defaults to false; common args default to `['-Oz']`). If the output is not `.wasm` (e.g. `.js`/`.mjs`/`.html`), wasm-opt runs on the associated `.wasm` (uses `WASM_BINARY_FILE` if set, otherwise `<basename>.wasm`). Not available for `archive`. |
 | `includeDirs`    | `string[]`                    | `[]`                           | Additional include directories (`-I`).                                                                                                                                                                                                                                       |
-| `defines`        | `Record<string, DefineValue>` | `{}`                           | Macro definitions (`-D`).                                                                                                                                                                                                                                                    |
+| `defines`        | `Record<string, DefineValue>` | `{}`                           | Macro definitions (`-D`). Use `null`/`undefined` to emit `-DKEY`.                                                                                                                                                                                                            |
 
 `PrepareEmsdkOptions` supports:
 

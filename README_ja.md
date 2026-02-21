@@ -37,7 +37,9 @@ export default defineConfig({
           // コンパイルオプション
           options: ['-O3', '-std=c99'],
           // リンクオプション
-          linkOptions: ['-s', 'STANDALONE_WASM=1', '--no-entry'],
+          linkOptions: ['--no-entry'],
+          // リンクディレクティブ
+          linkDirectives: { STANDALONE_WASM: 1 },
           // エクスポートシンボル
           exports: ['_add'],
         },
@@ -441,6 +443,38 @@ export default defineConfig({
   その場合は、 `nodeLinker: node-modules` を使うか、対象パッケージをunpluggedにして実体化する必要があります。
 
 ## wasm-optで追加最適化
+
+"wasm-opt"とは、Emscripten SDKに含まれる、追加の最適化を行うユーティリティです
+[Binaryen](https://github.com/WebAssembly/binaryen) によって実現されます。
+
+WASMバイナリを入力として、最適化を施した新しいWASMバイナリを出力します。
+
+emsdk-envは、wasm-optを使用してリンク結果に対して追加の最適化を行うことが出来ます:
+
+```typescript
+export default defineConfig({
+  plugins: [
+    emsdkEnv({
+      targets: {
+        // "offload.wasm"
+        offload: {
+          // wasm-optを使用して追加最適化の実行
+          wasmOpt: {
+            enable: true,
+            args: ['-Oz', '--enable-simd'],
+          },
+
+          //  :
+          //  :
+        },
+      },
+    }),
+  ],
+});
+```
+
+`wasmOpt.enable` は既定では `false` です。従って、wasm-optを使用する場合は明示的に `true` を指定して下さい。
+この事を利用して、`common` に `wasmOpt.args` のみ指定して、各ターゲットでwasm-optを適用するかどうかを `wasmOpt.enable` で制御できます。
 
 ## Viteオプション一覧
 
