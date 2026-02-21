@@ -64,7 +64,7 @@ export interface PrepareEmsdkOptions {
 /**
  * Value type for preprocessor defines.
  */
-export type DefineValue = string | number | boolean;
+export type DefineValue = string | number | boolean | null | undefined;
 
 /**
  * Options for running wasm-opt on the linked output.

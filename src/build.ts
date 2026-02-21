@@ -263,16 +263,21 @@ const resolveSourcesFromPatterns = async (
 };
 
 const buildDefineFlags = (defines: Record<string, DefineValue>) =>
-  Object.entries(defines).map(([key, value]) => `-D${key}=${String(value)}`);
+  Object.entries(defines).flatMap(([key, value]) =>
+    value === null || value === undefined
+      ? [`-D${key}`]
+      : [`-D${key}=${String(value)}`]
+  );
 
 const buildLinkDirectiveFlags = (directives: Record<string, DefineValue>) => {
   if (Object.keys(directives).length === 0) {
     return [];
   }
-  return Object.entries(directives).flatMap(([key, value]) => [
-    '-s',
-    `${key}=${String(value)}`,
-  ]);
+  return Object.entries(directives).flatMap(([key, value]) =>
+    value === null || value === undefined
+      ? ['-s', key]
+      : ['-s', `${key}=${String(value)}`]
+  );
 };
 
 const buildExportFlags = (exports: readonly string[]) => {
