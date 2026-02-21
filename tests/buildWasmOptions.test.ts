@@ -5,7 +5,7 @@
 
 import { mkdtemp, mkdir, readdir, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
-import { dirname, join, resolve } from 'path';
+import { dirname, join, parse, resolve } from 'path';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { buildWasm } from '../src/build';
@@ -37,7 +37,7 @@ vi.mock('../src/env', () => ({
 }));
 
 vi.mock('../src/commands', () => ({
-  runCommandWithEnv: vi.fn(async (_command: string, args: string[]) => {
+  runCommandWithEnv: vi.fn(async (command: string, args: string[]) => {
     if (args.includes('-c')) {
       compileConcurrency += 1;
       maxCompileConcurrency = Math.max(
@@ -53,6 +53,7 @@ vi.mock('../src/commands', () => ({
       }
     }
     let outFile: string | undefined;
+    const isCompile = args.includes('-c');
     const outIndex = args.indexOf('-o');
     if (outIndex !== -1) {
       outFile = args[outIndex + 1];
@@ -64,6 +65,52 @@ vi.mock('../src/commands', () => ({
     }
     await mkdir(dirname(outFile), { recursive: true });
     await writeFile(outFile, 'mock');
+    if (command === 'emcc' && !isCompile) {
+      const parsed = parse(outFile);
+      if (parsed.ext.toLowerCase() !== '.wasm') {
+        const baseName = parsed.name.toLowerCase().endsWith('.wasm')
+          ? parsed.name
+          : `${parsed.name}.wasm`;
+        const wasmFile = join(parsed.dir, baseName);
+        await writeFile(wasmFile, 'mock');
+      }
+      let wasmBinaryFile: string | undefined;
+      const extractWasmBinaryFile = (value: string) => {
+        if (value.startsWith('WASM_BINARY_FILE=')) {
+          return value.slice('WASM_BINARY_FILE='.length);
+        }
+        const match = value.match(
+          /^(?:-s|--settings)(?:=)?WASM_BINARY_FILE=(.+)$/
+        );
+        return match ? match[1] : undefined;
+      };
+      for (let index = 0; index < args.length; index += 1) {
+        const option = args[index];
+        if (!option) {
+          continue;
+        }
+        if (option === '-s' || option === '--settings') {
+          const next = args[index + 1];
+          const extracted = next ? extractWasmBinaryFile(next) : undefined;
+          if (extracted) {
+            wasmBinaryFile = extracted;
+            break;
+          }
+        }
+        const extracted = extractWasmBinaryFile(option);
+        if (extracted) {
+          wasmBinaryFile = extracted;
+          break;
+        }
+      }
+      if (wasmBinaryFile) {
+        const normalized = wasmBinaryFile
+          .trim()
+          .replace(/^(['"])(.*)\1$/, '$2');
+        const wasmFile = resolve(parsed.dir, normalized);
+        await writeFile(wasmFile, 'mock');
+      }
+    }
   }),
 }));
 
@@ -564,6 +611,93 @@ describe('buildWasm options', () => {
       expect(wasmOptArgs).toContain('-o');
       expect(wasmOptArgs).toContain(`${outFile}.opt`);
       expect(wasmOptArgs).toContain('-Oz');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('runs wasm-opt against wasm output when js module is emitted', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
+    const wasmDir = join(projectRoot, 'wasm');
+    await mkdir(wasmDir, { recursive: true });
+    await writeFile(join(wasmDir, 'alpha.c'), 'int alpha() { return 1; }');
+
+    const runCommandMock = vi.mocked(runCommandWithEnv);
+    runCommandMock.mockClear();
+
+    try {
+      await buildWasm({
+        root: projectRoot,
+        buildDir: join(projectRoot, '.wasm-build'),
+        rule: {
+          targets: {
+            app: {
+              outFile: 'app.mjs',
+              linkOptions: ['-s', 'EXPORT_ES6=1'],
+              wasmOpt: {
+                enable: true,
+              },
+            },
+          },
+        },
+      });
+
+      const wasmOptCalls = runCommandMock.mock.calls.filter(
+        (call) => call[0] === 'wasm-opt'
+      );
+      expect(wasmOptCalls.length).toBe(1);
+      const wasmOptArgs = wasmOptCalls[0]?.[1] as string[] | undefined;
+      expect(wasmOptArgs).toBeTruthy();
+      const wasmFile = resolve(projectRoot, 'src/wasm/app.wasm');
+      expect(wasmOptArgs?.[0]).toBe(wasmFile);
+      expect(wasmOptArgs).toContain('-o');
+      expect(wasmOptArgs).toContain(`${wasmFile}.opt`);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('uses WASM_BINARY_FILE when resolving wasm-opt input', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
+    const wasmDir = join(projectRoot, 'wasm');
+    await mkdir(wasmDir, { recursive: true });
+    await writeFile(join(wasmDir, 'alpha.c'), 'int alpha() { return 1; }');
+
+    const runCommandMock = vi.mocked(runCommandWithEnv);
+    runCommandMock.mockClear();
+
+    try {
+      await buildWasm({
+        root: projectRoot,
+        buildDir: join(projectRoot, '.wasm-build'),
+        rule: {
+          targets: {
+            app: {
+              outFile: 'app.mjs',
+              linkOptions: [
+                '-s',
+                'EXPORT_ES6=1',
+                '-s',
+                'WASM_BINARY_FILE=custom.wasm',
+              ],
+              wasmOpt: {
+                enable: true,
+              },
+            },
+          },
+        },
+      });
+
+      const wasmOptCalls = runCommandMock.mock.calls.filter(
+        (call) => call[0] === 'wasm-opt'
+      );
+      expect(wasmOptCalls.length).toBe(1);
+      const wasmOptArgs = wasmOptCalls[0]?.[1] as string[] | undefined;
+      expect(wasmOptArgs).toBeTruthy();
+      const wasmFile = resolve(projectRoot, 'src/wasm/custom.wasm');
+      expect(wasmOptArgs?.[0]).toBe(wasmFile);
+      expect(wasmOptArgs).toContain('-o');
+      expect(wasmOptArgs).toContain(`${wasmFile}.opt`);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }

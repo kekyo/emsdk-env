@@ -6,7 +6,7 @@
 import { readFile, rename, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { glob } from 'glob';
-import { dirname, isAbsolute, join, relative, resolve } from 'path';
+import { dirname, isAbsolute, join, parse, relative, resolve } from 'path';
 
 import { runCommandWithEnv } from './commands';
 import {
@@ -100,6 +100,75 @@ const resolveWasmOptArgs = (
   const targetArgs = target?.args ?? [];
   const mergedArgs = [...commonArgs, ...targetArgs];
   return expandArray(mergedArgs, env, 'wasmOpt.args');
+};
+
+const stripOuterQuotes = (value: string) => {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+};
+
+const extractWasmBinaryFile = (value: string) => {
+  if (value.startsWith('WASM_BINARY_FILE=')) {
+    return value.slice('WASM_BINARY_FILE='.length);
+  }
+  const match = value.match(/^(?:-s|--settings)(?:=)?WASM_BINARY_FILE=(.+)$/);
+  if (match) {
+    return match[1];
+  }
+  return undefined;
+};
+
+const resolveWasmBinaryFileFromLinkOptions = (
+  linkOptions: readonly string[]
+) => {
+  for (let index = 0; index < linkOptions.length; index += 1) {
+    const option = linkOptions[index];
+    if (!option) {
+      continue;
+    }
+    if (option === '-s' || option === '--settings') {
+      const next = linkOptions[index + 1];
+      if (!next) {
+        continue;
+      }
+      const extracted = extractWasmBinaryFile(next);
+      if (extracted) {
+        return stripOuterQuotes(extracted);
+      }
+    }
+    const extracted = extractWasmBinaryFile(option);
+    if (extracted) {
+      return stripOuterQuotes(extracted);
+    }
+  }
+  return undefined;
+};
+
+const resolveWasmOptInputFile = (
+  resolvedOutFile: string,
+  resolvedLinkOptions: readonly string[]
+) => {
+  const wasmBinaryFile =
+    resolveWasmBinaryFileFromLinkOptions(resolvedLinkOptions);
+  if (wasmBinaryFile) {
+    return isAbsolute(wasmBinaryFile)
+      ? wasmBinaryFile
+      : resolve(dirname(resolvedOutFile), wasmBinaryFile);
+  }
+  const parsed = parse(resolvedOutFile);
+  if (parsed.ext.toLowerCase() === '.wasm') {
+    return resolvedOutFile;
+  }
+  const baseName = parsed.name.toLowerCase().endsWith('.wasm')
+    ? parsed.name
+    : `${parsed.name}.wasm`;
+  return join(parsed.dir, baseName);
 };
 
 const resolvePath = (rootDir: string, value: string) =>
@@ -816,9 +885,18 @@ export const buildWasm = async (
           emsdkOptions.signal
         );
         if (wasmOptEnabled) {
-          const tempOutFile = `${resolvedOutFile}.opt`;
-          const wasmOptArgs = [
+          const wasmOptInput = resolveWasmOptInputFile(
             resolvedOutFile,
+            resolvedLinkOptions
+          );
+          if (!(await pathExists(wasmOptInput))) {
+            throw new Error(
+              `wasm-opt enabled but wasm binary not found: ${wasmOptInput}`
+            );
+          }
+          const tempOutFile = `${wasmOptInput}.opt`;
+          const wasmOptArgs = [
+            wasmOptInput,
             '-o',
             tempOutFile,
             ...resolvedWasmOptArgs,
@@ -833,8 +911,8 @@ export const buildWasm = async (
             buildEnv,
             emsdkOptions.signal
           );
-          await rm(resolvedOutFile, { force: true });
-          await rename(tempOutFile, resolvedOutFile);
+          await rm(wasmOptInput, { force: true });
+          await rename(tempOutFile, wasmOptInput);
         }
       }
 
