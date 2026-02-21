@@ -86,6 +86,15 @@ export interface WasmOptOptions {
 export type WasmBuildTargetType = 'wasm' | 'archive';
 
 /**
+ * Key-value declaration type.
+ * @remarks Uses both defines and linkDirectives.
+ */
+export type KeyValueInput =
+  | Record<string, DefineValue>
+  | Readonly<Map<string, DefineValue>>
+  | readonly string[];
+
+/**
  * Common build options shared across targets.
  */
 export interface WasmBuildCommonOptions {
@@ -100,7 +109,7 @@ export interface WasmBuildCommonOptions {
   /**
    * Common linker directives mapped to `-s KEY=VALUE`.
    */
-  readonly linkDirectives?: Record<string, DefineValue>;
+  readonly linkDirectives?: KeyValueInput;
   /**
    * Common symbols to export (mapped to `-s EXPORTED_FUNCTIONS=...`).
    */
@@ -116,7 +125,7 @@ export interface WasmBuildCommonOptions {
   /**
    * Common preprocessor defines applied as `-D` flags.
    */
-  readonly defines?: Record<string, DefineValue>;
+  readonly defines?: KeyValueInput;
 }
 
 /**
@@ -150,7 +159,7 @@ export interface WasmBuildTarget {
   /**
    * Linker directives mapped to `-s KEY=VALUE`.
    */
-  readonly linkDirectives?: Record<string, DefineValue>;
+  readonly linkDirectives?: KeyValueInput;
   /**
    * Common symbols to export (mapped to `-s EXPORTED_FUNCTIONS=...`).
    */
@@ -166,7 +175,7 @@ export interface WasmBuildTarget {
   /**
    * Preprocessor defines applied as `-D` flags.
    */
-  readonly defines?: Record<string, DefineValue>;
+  readonly defines?: KeyValueInput;
 }
 
 /**
@@ -188,7 +197,7 @@ export interface WasmBuildSourceGroup {
   /**
    * Preprocessor defines applied as `-D` flags for this group.
    */
-  readonly defines?: Record<string, DefineValue>;
+  readonly defines?: KeyValueInput;
 }
 
 /**

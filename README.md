@@ -141,6 +141,40 @@ We will cover these starting in the next chapter.
 
 ---
 
+## Preprocessor Macros and Linker Directives
+
+When compiling C/C++ sources, you can define preprocessor macros with command-line options like `-DOPT=1`.
+In emsdk-env, you can do this via `options`, but `defines` is supported as a dedicated field.
+
+Likewise, you can pass additional linker directives to the Emscripten SDK at link time, for example `-s STANDALONE_WASM=1`.
+In emsdk-env, you can do this via `linkOptions`, but `linkDirectives` is supported as a dedicated field.
+
+Here is an example:
+
+```typescript
+export default defineConfig({
+  plugins: [
+    emsdkEnv({
+      targets: {
+        add: {
+          // Define preprocessor macros `-DOPT=1`
+          defines: { OPT: 1 },
+          // Define linker directives `-s STANDALONE_WASM=1`
+          linkDirectives: { STANDALONE_WASM: 1 },
+
+          //  :
+          //  :
+        },
+      },
+    }),
+  ],
+});
+```
+
+- `defines` and `linkDirectives` can be provided as objects as shown above, and they also accept `Map` or `string[]`.
+- For `string[]`, separate key and value with `=` as in `'OPT=1'`.
+- To omit a value (e.g. `-DOPT`), set the value to `undefined` or `null`. For string entries, a definition without `=` is treated as a key without a value.
+
 ## Specifying Source Files
 
 By default, files matching `wasm/**/*.c` and `wasm/**/*.cpp` are treated as source files and built.
@@ -463,7 +497,7 @@ export default defineConfig({
           // Execute additional optimizations using wasm-opt
           wasmOpt: {
             enable: true,
-            args: [‘-Oz’, ‘--enable-simd’],
+            options: ['-Oz', '--enable-simd'],
           },
 
           //  :
@@ -476,7 +510,7 @@ export default defineConfig({
 ```
 
 `wasmOpt.enable` is `false` by default. Therefore, explicitly set it to `true` when using wasm-opt.
-Using this, you can specify only `wasmOpt.args` in `common` and control whether to apply wasm-opt for each target via `wasmOpt.enable`.
+Using this, you can specify only `wasmOpt.options` in `common` and control whether to apply wasm-opt for each target via `wasmOpt.enable`.
 
 ## Vite Options
 
@@ -497,19 +531,19 @@ The options accepted by `emsdk-env/vite` (`EmsdkVitePluginOptions`) are:
 
 The main keys available under `common` and `targets` are:
 
-| Key              | Type                          | Default                        | Description                                                                                                                                                                                                                                                                  |
-| :--------------- | :---------------------------- | :----------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `type`           | `'wasm' \| 'archive'`         | `'wasm'`                       | Output type. `archive` produces `.a`.                                                                                                                                                                                                                                        |
-| `outFile`        | `string`                      | `<target>.wasm` / `<target>.a` | Output file name (relative to `outDir` / `libDir`).                                                                                                                                                                                                                          |
-| `sources`        | `string[]`                    | `['**/*.c', '**/*.cpp']`       | Source globs (relative to `srcDir`).                                                                                                                                                                                                                                         |
-| `sourceGroups`   | `WasmBuildSourceGroup[]`      | `[]`                           | Source groups with additional options.                                                                                                                                                                                                                                       |
-| `options`        | `string[]`                    | `[]`                           | Extra options passed to `emcc -c`.                                                                                                                                                                                                                                           |
-| `linkOptions`    | `string[]`                    | `[]`                           | Extra linker options. Not available for `archive`.                                                                                                                                                                                                                           |
-| `linkDirectives` | `Record<string, DefineValue>` | `{}`                           | Linker directives mapped to `-s KEY=VALUE`. Use `null`/`undefined` to emit `-s KEY`. Not available for `archive`.                                                                                                                                                            |
-| `exports`        | `string[]`                    | `[]`                           | Exports passed via `-s EXPORTED_FUNCTIONS=...`. Not available for `archive`.                                                                                                                                                                                                 |
-| `wasmOpt`        | `WasmOptOptions`              | `undefined`                    | wasm-opt options (enable defaults to false; common args default to `['-Oz']`). If the output is not `.wasm` (e.g. `.js`/`.mjs`/`.html`), wasm-opt runs on the associated `.wasm` (uses `WASM_BINARY_FILE` if set, otherwise `<basename>.wasm`). Not available for `archive`. |
-| `includeDirs`    | `string[]`                    | `[]`                           | Additional include directories (`-I`).                                                                                                                                                                                                                                       |
-| `defines`        | `Record<string, DefineValue>` | `{}`                           | Macro definitions (`-D`). Use `null`/`undefined` to emit `-DKEY`.                                                                                                                                                                                                            |
+| Key              | Type                                                                            | Default                        | Description                                                                                                                                                                                                                                                                     |
+| :--------------- | :------------------------------------------------------------------------------ | :----------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `type`           | `'wasm' \| 'archive'`                                                           | `'wasm'`                       | Output type. `archive` produces `.a`.                                                                                                                                                                                                                                           |
+| `outFile`        | `string`                                                                        | `<target>.wasm` / `<target>.a` | Output file name (relative to `outDir` / `libDir`).                                                                                                                                                                                                                             |
+| `sources`        | `string[]`                                                                      | `['**/*.c', '**/*.cpp']`       | Source globs (relative to `srcDir`).                                                                                                                                                                                                                                            |
+| `sourceGroups`   | `WasmBuildSourceGroup[]`                                                        | `[]`                           | Source groups with additional options.                                                                                                                                                                                                                                          |
+| `options`        | `string[]`                                                                      | `[]`                           | Extra options passed to `emcc -c`.                                                                                                                                                                                                                                              |
+| `linkOptions`    | `string[]`                                                                      | `[]`                           | Extra linker options. Not available for `archive`.                                                                                                                                                                                                                              |
+| `linkDirectives` | `Record<string, DefineValue> \| Readonly<Map<string, DefineValue>> \| string[]` | `{}`                           | Linker directives mapped to `-s KEY=VALUE`. `string[]` entries are parsed as `KEY=VALUE` (value is string), or `KEY` (treated as `KEY=undefined`). Use `null`/`undefined` to emit `-s KEY`. Not available for `archive`.                                                        |
+| `exports`        | `string[]`                                                                      | `[]`                           | Exports passed via `-s EXPORTED_FUNCTIONS=...`. Not available for `archive`.                                                                                                                                                                                                    |
+| `wasmOpt`        | `WasmOptOptions`                                                                | `undefined`                    | wasm-opt options (enable defaults to false; common options default to `['-Oz']`). If the output is not `.wasm` (e.g. `.js`/`.mjs`/`.html`), wasm-opt runs on the associated `.wasm` (uses `WASM_BINARY_FILE` if set, otherwise `<basename>.wasm`). Not available for `archive`. |
+| `includeDirs`    | `string[]`                                                                      | `[]`                           | Additional include directories (`-I`).                                                                                                                                                                                                                                          |
+| `defines`        | `Record<string, DefineValue> \| Readonly<Map<string, DefineValue>> \| string[]` | `{}`                           | Macro definitions (`-D`). `string[]` entries are parsed as `KEY=VALUE` (value is string), or `KEY` (treated as `KEY=undefined`). Use `null`/`undefined` to emit `-DKEY`.                                                                                                        |
 
 `PrepareEmsdkOptions` supports:
 

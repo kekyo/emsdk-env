@@ -22,6 +22,7 @@ import type {
   BuildWasmOptions,
   BuildWasmResult,
   DefineValue,
+  KeyValueInput,
   PrepareEmsdkOptions,
   WasmOptOptions,
   WasmBuildTargetType,
@@ -78,18 +79,50 @@ const normalizePrepareOptions = (
   };
 };
 
+const parseKeyValueInput = (values: readonly string[]) => {
+  const parsed: Record<string, DefineValue> = {};
+  for (const entry of values) {
+    const index = entry.indexOf('=');
+    if (index === -1) {
+      parsed[entry] = undefined;
+      continue;
+    }
+    const key = entry.slice(0, index);
+    const value = entry.slice(index + 1);
+    parsed[key] = value;
+  }
+  return parsed;
+};
+
+const isKeyValueMap = (
+  value: KeyValueInput
+): value is Readonly<Map<string, DefineValue>> => value instanceof Map;
+
+const normalizeKeyValueInput = (
+  input: KeyValueInput | undefined
+): Record<string, DefineValue> => {
+  if (!input) {
+    return {};
+  }
+  if (Array.isArray(input)) {
+    return parseKeyValueInput(input);
+  }
+  if (isKeyValueMap(input)) {
+    return Object.fromEntries(input);
+  }
+  return { ...(input as Record<string, DefineValue>) };
+};
+
 const mergeDefines = (
-  common?: Record<string, DefineValue>,
-  target?: Record<string, DefineValue>
-) => ({
-  ...(common ?? {}),
-  ...(target ?? {}),
+  common?: KeyValueInput,
+  target?: KeyValueInput
+): Record<string, DefineValue> => ({
+  ...normalizeKeyValueInput(common),
+  ...normalizeKeyValueInput(target),
 });
 
-const mergeLinkDirectives = (
-  common?: Record<string, DefineValue>,
-  target?: Record<string, DefineValue>
-) => mergeDefines(common, target);
+const mergeLinkDirectives = (common?: KeyValueInput, target?: KeyValueInput) =>
+  mergeDefines(common, target);
 
 const resolveWasmOptEnabled = (
   common: WasmOptOptions | undefined,
@@ -791,7 +824,7 @@ export const buildWasm = async (
           ...baseIncludeDirs,
           ...ensureArray(group?.includeDirs),
         ];
-        const groupDefines = mergeDefines(baseDefines, group?.defines ?? {});
+        const groupDefines = mergeDefines(baseDefines, group?.defines);
         return buildCompileArgs(
           groupOptions,
           groupIncludeDirs,

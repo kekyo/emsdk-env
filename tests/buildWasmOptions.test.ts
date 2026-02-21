@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { buildWasm } from '../src/build';
 import { runCommandWithEnv } from '../src/commands';
 import { prepareEmsdk } from '../src/emsdk';
+import type { DefineValue } from '../src/types';
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const defaultBuildRoot = join(tmpdir(), 'emsdk-env');
@@ -376,6 +377,80 @@ describe('buildWasm options', () => {
     }
   });
 
+  test('accepts defines as string array', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
+    const wasmDir = join(projectRoot, 'wasm');
+    await mkdir(wasmDir, { recursive: true });
+    await writeFile(join(wasmDir, 'alpha.c'), 'int alpha() { return 1; }');
+
+    const runCommandMock = vi.mocked(runCommandWithEnv);
+    runCommandMock.mockClear();
+
+    try {
+      await buildWasm({
+        root: projectRoot,
+        buildDir: join(projectRoot, '.wasm-build'),
+        rule: {
+          targets: {
+            app: {
+              defines: ['FLAG', 'VALUE=1', 'NAME=alpha'],
+            },
+          },
+        },
+      });
+
+      const compileCall = runCommandMock.mock.calls.find((call) => {
+        const args = call[1] as string[] | undefined;
+        return Array.isArray(args) && args.includes('-c');
+      });
+      const compileArgs = compileCall?.[1] as string[] | undefined;
+      expect(compileArgs).toBeTruthy();
+      expect(compileArgs).toContain('-DFLAG');
+      expect(compileArgs).toContain('-DVALUE=1');
+      expect(compileArgs).toContain('-DNAME=alpha');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('accepts defines as ReadonlyMap', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
+    const wasmDir = join(projectRoot, 'wasm');
+    await mkdir(wasmDir, { recursive: true });
+    await writeFile(join(wasmDir, 'alpha.c'), 'int alpha() { return 1; }');
+
+    const runCommandMock = vi.mocked(runCommandWithEnv);
+    runCommandMock.mockClear();
+
+    try {
+      await buildWasm({
+        root: projectRoot,
+        buildDir: join(projectRoot, '.wasm-build'),
+        rule: {
+          targets: {
+            app: {
+              defines: new Map<string, DefineValue>([
+                ['FLAG', undefined],
+                ['VALUE', 1],
+              ]),
+            },
+          },
+        },
+      });
+
+      const compileCall = runCommandMock.mock.calls.find((call) => {
+        const args = call[1] as string[] | undefined;
+        return Array.isArray(args) && args.includes('-c');
+      });
+      const compileArgs = compileCall?.[1] as string[] | undefined;
+      expect(compileArgs).toBeTruthy();
+      expect(compileArgs).toContain('-DFLAG');
+      expect(compileArgs).toContain('-DVALUE=1');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   test('allows overlapping sources across sourceGroups with unique objects', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
     const wasmDir = join(projectRoot, 'wasm');
@@ -588,6 +663,43 @@ describe('buildWasm options', () => {
       expect(linkArgs).toContain('EXPORT_ES6');
       expect(linkArgs).not.toContain('MODULARIZE=');
       expect(linkArgs).not.toContain('EXPORT_ES6=');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('accepts linkDirectives as string array', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
+    const wasmDir = join(projectRoot, 'wasm');
+    await mkdir(wasmDir, { recursive: true });
+    await writeFile(join(wasmDir, 'alpha.c'), 'int alpha() { return 1; }');
+
+    const runCommandMock = vi.mocked(runCommandWithEnv);
+    runCommandMock.mockClear();
+
+    try {
+      await buildWasm({
+        root: projectRoot,
+        buildDir: join(projectRoot, '.wasm-build'),
+        rule: {
+          targets: {
+            app: {
+              linkDirectives: ['MODULARIZE', 'EXPORT_ES6=1'],
+            },
+          },
+        },
+      });
+
+      const linkCalls = runCommandMock.mock.calls.filter((call) => {
+        const args = call[1] as string[] | undefined;
+        return (
+          Array.isArray(args) && args.includes('-o') && !args.includes('-c')
+        );
+      });
+      const linkArgs = linkCalls[0]?.[1] as string[] | undefined;
+      expect(linkArgs).toBeTruthy();
+      expect(linkArgs).toContain('MODULARIZE');
+      expect(linkArgs).toContain('EXPORT_ES6=1');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -880,10 +992,10 @@ describe('buildWasm options', () => {
           targets: {
             app: {
               outFile: 'app.mjs',
-              linkDirectives: {
-                EXPORT_ES6: 1,
-                WASM_BINARY_FILE: 'custom-directive.wasm',
-              },
+              linkDirectives: new Map<string, DefineValue>([
+                ['EXPORT_ES6', 1],
+                ['WASM_BINARY_FILE', 'custom-directive.wasm'],
+              ]),
               wasmOpt: {
                 enable: true,
               },
