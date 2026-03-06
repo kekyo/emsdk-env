@@ -3,7 +3,15 @@
 // Under MIT.
 // https://github.com/kekyo/emsdk-env
 
-import { mkdtemp, mkdir, readdir, rm, writeFile } from 'fs/promises';
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from 'fs/promises';
 import { tmpdir } from 'os';
 import { dirname, join, parse, resolve } from 'path';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
@@ -11,7 +19,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { buildWasm } from '../src/build';
 import { runCommandWithEnv } from '../src/commands';
 import { prepareEmsdk } from '../src/emsdk';
-import type { DefineValue } from '../src/types';
+import type { DefineValue, LinkDirectiveValue } from '../src/types';
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const defaultBuildRoot = join(tmpdir(), 'emsdk-env');
@@ -705,6 +713,50 @@ describe('buildWasm options', () => {
     }
   });
 
+  test('supports array-valued linkDirectives and expands placeholders', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
+    const wasmDir = join(projectRoot, 'wasm');
+    await mkdir(wasmDir, { recursive: true });
+    await writeFile(join(wasmDir, 'alpha.c'), 'int alpha() { return 1; }');
+
+    const runCommandMock = vi.mocked(runCommandWithEnv);
+    runCommandMock.mockClear();
+
+    try {
+      await buildWasm({
+        root: projectRoot,
+        buildDir: join(projectRoot, '.wasm-build'),
+        rule: {
+          common: {
+            linkDirectives: new Map<string, LinkDirectiveValue>([
+              ['INCOMING_MODULE_JS_API', ['print', '{TARGET_NAME}Hook']],
+            ]),
+          },
+          targets: {
+            app: {
+              linkDirectives: {
+                EXPORTED_RUNTIME_METHODS: ['wasmMemory'],
+              },
+            },
+          },
+        },
+      });
+
+      const linkCalls = runCommandMock.mock.calls.filter((call) => {
+        const args = call[1] as string[] | undefined;
+        return (
+          Array.isArray(args) && args.includes('-o') && !args.includes('-c')
+        );
+      });
+      const linkArgs = linkCalls[0]?.[1] as string[] | undefined;
+      expect(linkArgs).toBeTruthy();
+      expect(linkArgs).toContain('INCOMING_MODULE_JS_API=["print","appHook"]');
+      expect(linkArgs).toContain('EXPORTED_RUNTIME_METHODS=["wasmMemory"]');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   test('rejects linkOptions for archive target', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
     const wasmDir = join(projectRoot, 'wasm');
@@ -1366,6 +1418,232 @@ describe('buildWasm options', () => {
           },
         })
       ).rejects.toThrow('does not provide include or lib directories');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('does not generate loader when generatedLoader.enable is omitted', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
+    const wasmDir = join(projectRoot, 'wasm');
+    await mkdir(wasmDir, { recursive: true });
+    await writeFile(join(wasmDir, 'alpha.c'), 'int alpha() { return 1; }');
+
+    try {
+      const result = await buildWasm({
+        root: projectRoot,
+        buildDir: join(projectRoot, '.wasm-build'),
+        generatedLoader: {},
+        rule: {
+          targets: {
+            alpha: {},
+          },
+        },
+      });
+
+      expect(result.generatedLoaderFile).toBeUndefined();
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('generates loader at the default path', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
+    const wasmDir = join(projectRoot, 'wasm');
+    await mkdir(wasmDir, { recursive: true });
+    await writeFile(join(wasmDir, 'alpha.c'), 'int alpha() { return 1; }');
+
+    try {
+      const result = await buildWasm({
+        root: projectRoot,
+        buildDir: join(projectRoot, '.wasm-build'),
+        generatedLoader: {
+          enable: true,
+        },
+        rule: {
+          targets: {
+            alpha: {},
+          },
+        },
+      });
+
+      const generatedLoaderFile = result.generatedLoaderFile;
+      expect(generatedLoaderFile).toBe(
+        resolve(projectRoot, 'src/generated/wasm-loader.ts')
+      );
+      if (!generatedLoaderFile) {
+        throw new Error('generatedLoaderFile was not returned.');
+      }
+      const content = await readFile(generatedLoaderFile, 'utf8');
+      expect(content).toContain('export const loadAlphaWasm');
+      expect(content).toContain(
+        'new URL("../wasm/alpha.wasm", import.meta.url)'
+      );
+      expect(content).toContain('readonly url?: string | URL;');
+      expect(content).toContain('readonly memory: WebAssembly.Memory;');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('generates loader with custom path and aggregates wasm targets', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
+    const wasmDir = join(projectRoot, 'wasm');
+    await mkdir(wasmDir, { recursive: true });
+    await writeFile(join(wasmDir, 'alpha.c'), 'int alpha() { return 1; }');
+    await writeFile(join(wasmDir, 'beta.c'), 'int beta() { return 2; }');
+
+    try {
+      const result = await buildWasm({
+        root: projectRoot,
+        buildDir: join(projectRoot, '.wasm-build'),
+        generatedLoader: {
+          enable: true,
+          outFile: 'app/generated/custom-loader.ts',
+        },
+        rule: {
+          targets: {
+            alpha: {},
+            beta: {},
+            libgamma: {
+              type: 'archive',
+            },
+          },
+        },
+      });
+
+      const generatedLoaderFile = result.generatedLoaderFile;
+      expect(generatedLoaderFile).toBe(
+        resolve(projectRoot, 'app/generated/custom-loader.ts')
+      );
+      if (!generatedLoaderFile) {
+        throw new Error('generatedLoaderFile was not returned.');
+      }
+      const content = await readFile(generatedLoaderFile, 'utf8');
+      expect(content).toContain('export const loadAlphaWasm');
+      expect(content).toContain('export const loadBetaWasm');
+      expect(content).not.toContain('loadLibgammaWasm');
+      expect(content).toContain(
+        'new URL("../../src/wasm/alpha.wasm", import.meta.url)'
+      );
+      expect(content).toContain(
+        'new URL("../../src/wasm/beta.wasm", import.meta.url)'
+      );
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('generates loader with shared runtime only when all targets are archives', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
+    const wasmDir = join(projectRoot, 'wasm');
+    await mkdir(wasmDir, { recursive: true });
+    await writeFile(join(wasmDir, 'alpha.c'), 'int alpha() { return 1; }');
+
+    try {
+      const result = await buildWasm({
+        root: projectRoot,
+        buildDir: join(projectRoot, '.wasm-build'),
+        generatedLoader: {
+          enable: true,
+        },
+        rule: {
+          targets: {
+            libalpha: {
+              type: 'archive',
+            },
+          },
+        },
+      });
+
+      const generatedLoaderFile = result.generatedLoaderFile;
+      expect(generatedLoaderFile).toBe(
+        resolve(projectRoot, 'src/generated/wasm-loader.ts')
+      );
+      if (!generatedLoaderFile) {
+        throw new Error('generatedLoaderFile was not returned.');
+      }
+      const content = await readFile(generatedLoaderFile, 'utf8');
+      expect(content).toContain('export const loadWasm = async');
+      expect(content).not.toContain('loadLibalphaWasm');
+      expect(content).not.toContain('new URL(');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('does not rewrite generated loader when content is unchanged', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
+    const wasmDir = join(projectRoot, 'wasm');
+    await mkdir(wasmDir, { recursive: true });
+    await writeFile(join(wasmDir, 'alpha.c'), 'int alpha() { return 1; }');
+
+    try {
+      const first = await buildWasm({
+        root: projectRoot,
+        buildDir: join(projectRoot, '.wasm-build'),
+        generatedLoader: {
+          enable: true,
+        },
+        rule: {
+          targets: {
+            alpha: {},
+          },
+        },
+      });
+      const generatedLoaderFile = first.generatedLoaderFile;
+      if (!generatedLoaderFile) {
+        throw new Error('generatedLoaderFile was not returned.');
+      }
+      const firstStat = await stat(generatedLoaderFile);
+
+      await wait(20);
+
+      const second = await buildWasm({
+        root: projectRoot,
+        buildDir: join(projectRoot, '.wasm-build'),
+        generatedLoader: {
+          enable: true,
+        },
+        rule: {
+          targets: {
+            alpha: {},
+          },
+        },
+      });
+      expect(second.generatedLoaderFile).toBe(generatedLoaderFile);
+      const secondStat = await stat(generatedLoaderFile);
+
+      expect(secondStat.mtimeMs).toBe(firstStat.mtimeMs);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects generated loader under watched source directories', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
+    const wasmDir = join(projectRoot, 'wasm');
+    await mkdir(wasmDir, { recursive: true });
+    await writeFile(join(wasmDir, 'alpha.c'), 'int alpha() { return 1; }');
+
+    try {
+      await expect(
+        buildWasm({
+          root: projectRoot,
+          buildDir: join(projectRoot, '.wasm-build'),
+          generatedLoader: {
+            enable: true,
+            outFile: 'wasm/generated/loader.ts',
+          },
+          rule: {
+            targets: {
+              alpha: {},
+            },
+          },
+        })
+      ).rejects.toThrow(
+        'generatedLoader.outFile must not be placed under watched directory'
+      );
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }

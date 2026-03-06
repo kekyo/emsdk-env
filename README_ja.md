@@ -30,6 +30,8 @@ export default defineConfig({
   plugins: [
     // プラグインとして追加
     emsdkEnv({
+      // WASMローダーコードを生成
+      generatedLoader: { enable: true },
       // ビルドターゲット
       targets: {
         // "add.wasm"を生成
@@ -90,12 +92,15 @@ project/
 ├── package.json
 ├── vite.config.ts
 ├── src/
+│   ├── generated/
+│   │   └── wasm-loader.ts   // (自動生成)
 │   └── wasm/
-│       └── add.wasm
+│       └── add.wasm         // (ビルドされたWASMバイナリ)
 └── wasm/
     └── add.c
 ```
 
+- `wasm-loader.ts`は、WASMバイナリをロードして使用可能にするヘルパーコードです。
 - 上記の他に、OS のテンポラリディレクトリ配下にビルド用の一時ディレクトリが作られます。
   デフォルトの場所は `${TMPDIR}/emsdk-env`（Unix では通常 `/tmp/emsdk-env`）です。
   これはビルド時に使われ、通常はビルド後に削除されます。
@@ -104,35 +109,47 @@ project/
 もちろん、これらは変更することが出来ます。Viteプラグインの引数に指定します。
 
 ビルドされたバイナリが`src/wasm/`に配置される事に違和感を感じるかもしれませんが、これはViteサーバーがデフォルトでWASMバイナリに容易にアクセスできるパスだからです。
-このように配置されたWASMバイナリは、以下のようなボイラープレートコードで呼び出し可能になります:
+
+`generatedLoader.enable` を `true` にすると、emsdk-env はデフォルトで `src/generated/wasm-loader.ts` にWASMローダーヘルパーコードも生成します。
+この loader を使うと、非常に簡単にWASMバイナリの関数を呼び出せます:
 
 ```typescript
-// WASMバイナリを読み込む
-const wasmUrl = new URL('./wasm/add.wasm', import.meta.url);
-const response = await fetch(wasmUrl);
-const wasmBuffer = await response.arrayBuffer();
+import { loadAddWasm } from './generated/wasm-loader';
 
-// WASMランタイムで実体化させる
-const { instance } = await WebAssembly.instantiate(wasmBuffer, {});
-
-// WASMバイナリ内の公開された関数エンドポイントを取得する
-const exports = instance.exports as {
+// WASMエクスポート関数の定義 (手動で定義が必要です)
+interface AddExports {
   add?: (a: number, b: number) => number;
-  _add?: (a: number, b: number) => number;
-};
-const add = exports.add ?? exports._add;
+}
+
+// WASMバイナリをロードして使用可能にする
+const wasm = await loadAddWasm<AddExports>();
+
+// `add()`関数を取得
+const add = wasm.exports.add;
 if (typeof add !== 'function') {
   throw new Error('add function not found in wasm exports.');
 }
 
-// 関数を呼び出す
+// 関数を実行
 const result = add(1, 2);
+```
+
+- WASMエクスポート関数の定義は、自分で記述する必要が有ります。その際、エクスポートする関数のシンボル名は、
+  TypeScript上ではC/C++の関数名と同一ですが、 `exports: [...]` に指定するシンボル名は、
+  通常プレフィックスにアンダースコアが必要です（`add()` --> `_add`）。
+
+WASMバイナリの位置がデフォルトと異なる場合は、明示的にURLを指定することも出来ます:
+
+```typescript
+// WASMバイナリの位置を指定してロード
+const wasm = await loadAddWasm<AddExports>({
+  url: new URL('./alternate/add.wasm', import.meta.url),
+});
 ```
 
 デフォルトのままで運用するなら、ほぼこれで構成作業はありません。
 
 他のトピックとしては、ソースファイルの明示的な指定、複数のコンパイルオプションの分離適用、複数のターゲット出力を扱う方法、アーカイブライブラリファイルの生成と参照、NPMパッケージの生成と参照、と言った機能があります。
-
 次の章より、これらについて説明します。
 
 ---
@@ -156,7 +173,10 @@ export default defineConfig({
           // プリプロセッサマクロの定義 `-DOPT=1`
           defines: { OPT: 1 },
           // リンクディレクティブの定義 `-s STANDALONE_WASM=1`
-          linkDirectives: { STANDALONE_WASM: 1 },
+          linkDirectives: {
+            STANDALONE_WASM: 1,
+            EXPORTED_RUNTIME_METHODS: ['wasmMemory'],
+          },
 
           //  :
           //  :
@@ -170,6 +190,8 @@ export default defineConfig({
 - `defines` と `linkDirectives` は、上記例のようにオブジェクト定義として指定できますが、その他に `Map` や文字列の配列も受け付けます。
 - 文字列の配列を指定する場合は、 `'OPT=1'` のように、key-valueを `'='` で区切ります。
 - valueを省略する場合(`-DOPT` など)は、値に `undefined` または `null` を指定します。文字列で指定する場合は、`'='` で区切らなければ値のない定義となります。
+- `defines` の値は scalar (`string | number | boolean | null | undefined`) のみです。
+- `linkDirectives` の値は `string[]` も指定でき、その場合は `-s EXPORTED_RUNTIME_METHODS=["wasmMemory"]` のような JSON 配列形式で出力します。
 
 ## ソースファイルの指定
 
@@ -514,34 +536,39 @@ export default defineConfig({
 
 `emsdk-env/vite` に渡すオプション（`EmsdkVitePluginOptions`）の一覧です。
 
-| キー              | 型                                | デフォルト                    | 説明                                                                       |
-| :---------------- | :-------------------------------- | :---------------------------- | :------------------------------------------------------------------------- |
-| `emsdk`           | `PrepareEmsdkOptions`             | `{ targetVersion: 'latest' }` | Emscripten SDKの取得設定。                                                 |
-| `srcDir`          | `string`                          | `'wasm'`                      | C/C++ソースのルートディレクトリ（プロジェクトルート相対）。                |
-| `includeDir`      | `string`                          | `'include'`                   | デフォルトのインクルードディレクトリ（プロジェクトルート相対）。           |
-| `outDir`          | `string`                          | `'src/wasm'`                  | WASM出力ディレクトリ（プロジェクトルート相対）。                           |
-| `libDir`          | `string`                          | `'lib'`                       | アーカイブ出力ディレクトリ（プロジェクトルート相対）。                     |
-| `buildDir`        | `string`                          | `<OSのテンポラリ>/emsdk-env`  | 一時ビルドディレクトリ。                                                   |
-| `cleanupBuildDir` | `boolean`                         | `true`                        | ビルド後に一時ディレクトリを削除するか。                                   |
-| `imports`         | `string[]`                        | `[]`                          | 参照するNPMパッケージ名。`include`/`lib` を自動検出して `-I`/`-L` を追加。 |
-| `common`          | `WasmBuildCommonOptions`          | `undefined`                   | 全ターゲットに適用する共通設定。                                           |
-| `targets`         | `Record<string, WasmBuildTarget>` | 必須                          | ターゲット定義。キーがターゲット名。                                       |
+| キー              | 型                                       | デフォルト                    | 説明                                                                                          |
+| :---------------- | :--------------------------------------- | :---------------------------- | :-------------------------------------------------------------------------------------------- |
+| `emsdk`           | `PrepareEmsdkOptions`                    | `{ targetVersion: 'latest' }` | Emscripten SDKの取得設定。                                                                    |
+| `srcDir`          | `string`                                 | `'wasm'`                      | C/C++ソースのルートディレクトリ（プロジェクトルート相対）。                                   |
+| `includeDir`      | `string`                                 | `'include'`                   | デフォルトのインクルードディレクトリ（プロジェクトルート相対）。                              |
+| `outDir`          | `string`                                 | `'src/wasm'`                  | WASM出力ディレクトリ（プロジェクトルート相対）。                                              |
+| `libDir`          | `string`                                 | `'lib'`                       | アーカイブ出力ディレクトリ（プロジェクトルート相対）。                                        |
+| `buildDir`        | `string`                                 | `<OSのテンポラリ>/emsdk-env`  | 一時ビルドディレクトリ。                                                                      |
+| `cleanupBuildDir` | `boolean`                                | `true`                        | ビルド後に一時ディレクトリを削除するか。                                                      |
+| `imports`         | `string[]`                               | `[]`                          | 参照するNPMパッケージ名。`include`/`lib` を自動検出して `-I`/`-L` を追加。                    |
+| `generatedLoader` | `{ enable?: boolean; outFile?: string }` | `undefined`                   | `enable` が `true` の時に、ターゲットプロジェクトへ依存ゼロの TypeScript WASM loader を生成。 |
+| `common`          | `WasmBuildCommonOptions`                 | `undefined`                   | 全ターゲットに適用する共通設定。                                                              |
+| `targets`         | `Record<string, WasmBuildTarget>`        | 必須                          | ターゲット定義。キーがターゲット名。                                                          |
+
+`generatedLoader.enable` を `true` にした場合の既定出力先は `src/generated/wasm-loader.ts` です。
+生成ファイルには `loadWasm<T>()`, `WasmInstance<T>`, `loadAddWasm<T>()` のような target wrapper が含まれます。
+`generatedLoader.outFile` は、`srcDir` や `includeDirs` のような監視対象ディレクトリ配下には配置しないで下さい。
 
 `common` と `targets` 内で使える主なキーは以下です。
 
-| キー             | 型                                                                              | デフォルト                     | 説明                                                                                                                                                                                                                                                                                            |
-| :--------------- | :------------------------------------------------------------------------------ | :----------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `type`           | `'wasm' \| 'archive'`                                                           | `'wasm'`                       | 出力形式。`archive` は `.a` を生成。                                                                                                                                                                                                                                                            |
-| `outFile`        | `string`                                                                        | `<target>.wasm` / `<target>.a` | 出力ファイル名（`outDir` / `libDir` 相対）。                                                                                                                                                                                                                                                    |
-| `sources`        | `string[]`                                                                      | `['**/*.c', '**/*.cpp']`       | 対象ソース（`srcDir` 相対）。                                                                                                                                                                                                                                                                   |
-| `sourceGroups`   | `WasmBuildSourceGroup[]`                                                        | `[]`                           | 追加オプション付きのソースグループ。                                                                                                                                                                                                                                                            |
-| `options`        | `string[]`                                                                      | `[]`                           | `emcc -c` に渡す追加オプション。                                                                                                                                                                                                                                                                |
-| `linkOptions`    | `string[]`                                                                      | `[]`                           | リンク時の追加オプション。`archive` では使用不可。                                                                                                                                                                                                                                              |
-| `linkDirectives` | `Record<string, DefineValue> \| Readonly<Map<string, DefineValue>> \| string[]` | `{}`                           | `-s KEY=VALUE` に対応するリンク指示。`string[]` は `KEY=VALUE`（値は文字列）または `KEY`（`KEY=undefined` 相当）として解釈します。`null`/`undefined` で `-s KEY` を出力します。`archive` では使用不可。                                                                                         |
-| `exports`        | `string[]`                                                                      | `[]`                           | `-s EXPORTED_FUNCTIONS=...` で指定するエクスポート。`archive` では使用不可。                                                                                                                                                                                                                    |
-| `wasmOpt`        | `WasmOptOptions`                                                                | `undefined`                    | wasm-opt の設定（enableのデフォルトは無効、commonのoptionsは `['-Oz']`）。出力が `.wasm` 以外（例: `.js`/`.mjs`/`.html`）の場合は、対応する `.wasm` に対して wasm-opt を実行します（`WASM_BINARY_FILE` が指定されていればそれを使用し、未指定なら `<basename>.wasm`）。`archive` では使用不可。 |
-| `includeDirs`    | `string[]`                                                                      | `[]`                           | `-I` を追加するインクルードディレクトリ。                                                                                                                                                                                                                                                       |
-| `defines`        | `Record<string, DefineValue> \| Readonly<Map<string, DefineValue>> \| string[]` | `{}`                           | `-D` を追加するマクロ定義。`string[]` は `KEY=VALUE`（値は文字列）または `KEY`（`KEY=undefined` 相当）として解釈します。`null`/`undefined` で `-DKEY` を出力します。                                                                                                                            |
+| キー             | 型                                                                                                                        | デフォルト                     | 説明                                                                                                                                                                                                                                                                                                                                                        |
+| :--------------- | :------------------------------------------------------------------------------------------------------------------------ | :----------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `type`           | `'wasm' \| 'archive'`                                                                                                     | `'wasm'`                       | 出力形式。`archive` は `.a` を生成。                                                                                                                                                                                                                                                                                                                        |
+| `outFile`        | `string`                                                                                                                  | `<target>.wasm` / `<target>.a` | 出力ファイル名（`outDir` / `libDir` 相対）。                                                                                                                                                                                                                                                                                                                |
+| `sources`        | `string[]`                                                                                                                | `['**/*.c', '**/*.cpp']`       | 対象ソース（`srcDir` 相対）。                                                                                                                                                                                                                                                                                                                               |
+| `sourceGroups`   | `WasmBuildSourceGroup[]`                                                                                                  | `[]`                           | 追加オプション付きのソースグループ。                                                                                                                                                                                                                                                                                                                        |
+| `options`        | `string[]`                                                                                                                | `[]`                           | `emcc -c` に渡す追加オプション。                                                                                                                                                                                                                                                                                                                            |
+| `linkOptions`    | `string[]`                                                                                                                | `[]`                           | リンク時の追加オプション。`archive` では使用不可。                                                                                                                                                                                                                                                                                                          |
+| `linkDirectives` | `Record<string, DefineValue \| readonly string[]> \| Readonly<Map<string, DefineValue \| readonly string[]>> \| string[]` | `{}`                           | `-s KEY=VALUE` に対応するリンク指示。object / Map の値には scalar に加えて `string[]` も指定でき、配列値は `EXPORTED_RUNTIME_METHODS=["wasmMemory"]` のような JSON 配列形式で出力します。`string[]` は `KEY=VALUE`（値は文字列）または `KEY`（`KEY=undefined` 相当）として解釈します。`null`/`undefined` で `-s KEY` を出力します。`archive` では使用不可。 |
+| `exports`        | `string[]`                                                                                                                | `[]`                           | `-s EXPORTED_FUNCTIONS=...` で指定するエクスポート。`archive` では使用不可。                                                                                                                                                                                                                                                                                |
+| `wasmOpt`        | `WasmOptOptions`                                                                                                          | `undefined`                    | wasm-opt の設定（enableのデフォルトは無効、commonのoptionsは `['-Oz']`）。出力が `.wasm` 以外（例: `.js`/`.mjs`/`.html`）の場合は、対応する `.wasm` に対して wasm-opt を実行します（`WASM_BINARY_FILE` が指定されていればそれを使用し、未指定なら `<basename>.wasm`）。`archive` では使用不可。                                                             |
+| `includeDirs`    | `string[]`                                                                                                                | `[]`                           | `-I` を追加するインクルードディレクトリ。                                                                                                                                                                                                                                                                                                                   |
+| `defines`        | `Record<string, DefineValue> \| Readonly<Map<string, DefineValue>> \| string[]`                                           | `{}`                           | `-D` を追加するマクロ定義。値は scalar のみです。`string[]` は `KEY=VALUE`（値は文字列）または `KEY`（`KEY=undefined` 相当）として解釈します。`null`/`undefined` で `-DKEY` を出力します。                                                                                                                                                                  |
 
 `emsdk` に指定できる `PrepareEmsdkOptions` は以下の通りです。
 

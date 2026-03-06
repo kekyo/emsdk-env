@@ -9,6 +9,9 @@ import emsdkEnv from 'emsdk-env/vite';
 export default defineConfig({
   plugins: [
     emsdkEnv({
+      generatedLoader: {
+        enable: true,
+      },
       targets: {
         add: {
           options: ['-O3', '-std=c99'],

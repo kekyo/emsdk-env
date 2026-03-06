@@ -67,6 +67,27 @@ export interface PrepareEmsdkOptions {
 export type DefineValue = string | number | boolean | null | undefined;
 
 /**
+ * Input type for preprocessor defines.
+ */
+export type DefineInput =
+  | Record<string, DefineValue>
+  | Readonly<Map<string, DefineValue>>
+  | readonly string[];
+
+/**
+ * Value type for linker directives.
+ */
+export type LinkDirectiveValue = DefineValue | readonly string[];
+
+/**
+ * Input type for linker directives.
+ */
+export type LinkDirectiveInput =
+  | Record<string, LinkDirectiveValue>
+  | Readonly<Map<string, LinkDirectiveValue>>
+  | readonly string[];
+
+/**
  * Options for running wasm-opt on the linked output.
  */
 export interface WasmOptOptions {
@@ -81,18 +102,29 @@ export interface WasmOptOptions {
 }
 
 /**
+ * Options for generating a zero-dependency TypeScript WASM loader file.
+ */
+export interface GeneratedLoaderOptions {
+  /**
+   * Enable generated loader output (defaults to false).
+   */
+  readonly enable?: boolean;
+  /**
+   * Output file path for the generated loader source (project-root relative by default).
+   */
+  readonly outFile?: string;
+}
+
+/**
  * Build target type for WASM or archive outputs.
  */
 export type WasmBuildTargetType = 'wasm' | 'archive';
 
 /**
  * Key-value declaration type.
- * @remarks Uses both defines and linkDirectives.
+ * @deprecated Use `DefineInput` or `LinkDirectiveInput`.
  */
-export type KeyValueInput =
-  | Record<string, DefineValue>
-  | Readonly<Map<string, DefineValue>>
-  | readonly string[];
+export type KeyValueInput = DefineInput;
 
 /**
  * Common build options shared across targets.
@@ -109,7 +141,7 @@ export interface WasmBuildCommonOptions {
   /**
    * Common linker directives mapped to `-s KEY=VALUE`.
    */
-  readonly linkDirectives?: KeyValueInput;
+  readonly linkDirectives?: LinkDirectiveInput;
   /**
    * Common symbols to export (mapped to `-s EXPORTED_FUNCTIONS=...`).
    */
@@ -125,7 +157,7 @@ export interface WasmBuildCommonOptions {
   /**
    * Common preprocessor defines applied as `-D` flags.
    */
-  readonly defines?: KeyValueInput;
+  readonly defines?: DefineInput;
 }
 
 /**
@@ -159,7 +191,7 @@ export interface WasmBuildTarget {
   /**
    * Linker directives mapped to `-s KEY=VALUE`.
    */
-  readonly linkDirectives?: KeyValueInput;
+  readonly linkDirectives?: LinkDirectiveInput;
   /**
    * Common symbols to export (mapped to `-s EXPORTED_FUNCTIONS=...`).
    */
@@ -175,7 +207,7 @@ export interface WasmBuildTarget {
   /**
    * Preprocessor defines applied as `-D` flags.
    */
-  readonly defines?: KeyValueInput;
+  readonly defines?: DefineInput;
 }
 
 /**
@@ -197,7 +229,7 @@ export interface WasmBuildSourceGroup {
   /**
    * Preprocessor defines applied as `-D` flags for this group.
    */
-  readonly defines?: KeyValueInput;
+  readonly defines?: DefineInput;
 }
 
 /**
@@ -245,6 +277,10 @@ export interface BuildWasmCommonOptions {
    */
   readonly libDir?: string;
   /**
+   * Generate a zero-dependency TypeScript loader into the target project.
+   */
+  readonly generatedLoader?: GeneratedLoaderOptions;
+  /**
    * Temporary build directory (defaults to OS temp dir).
    */
   readonly buildDir?: string;
@@ -288,4 +324,8 @@ export interface BuildWasmResult {
    * Output paths keyed by target name.
    */
   readonly outFiles: Record<string, string>;
+  /**
+   * Generated loader source path, when enabled.
+   */
+  readonly generatedLoaderFile?: string;
 }

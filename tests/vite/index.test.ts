@@ -116,6 +116,39 @@ describe('emsdkEnv', () => {
     expect(Object.prototype.hasOwnProperty.call(call, 'emsdk')).toBe(false);
   });
 
+  test('passes generatedLoader to buildWasm', async () => {
+    const options = {
+      generatedLoader: {
+        enable: true,
+        outFile: 'src/generated/wasm-loader.ts',
+      },
+      targets: {
+        target1: {
+          sources: ['**/*.c'],
+        },
+      },
+    };
+    const plugin = emsdkEnv(options);
+
+    await (plugin.configResolved as any)?.call({} as unknown as object, {
+      root: '/mock/root',
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      },
+      logLevel: 'info',
+      command: 'build',
+    });
+    await (plugin.buildStart as any).call({} as unknown as object);
+
+    expect(buildWasm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        generatedLoader: options.generatedLoader,
+      })
+    );
+  });
+
   test('runs buildWasm on serve and reloads after changes', async () => {
     const options = {
       srcDir: 'wasm',
