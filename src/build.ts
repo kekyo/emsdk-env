@@ -515,9 +515,7 @@ const buildGeneratedLoaderContent = (
   options?: TargetWasmLoadOptions
 ): Promise<WasmInstance<T>> => {
   const source = options?.url ?? new URL(${specifier}, import.meta.url);
-  return await loadWasm<T>(source, {
-    imports: options?.imports,
-  });
+  return await loadWasm<T>(source, createWasmLoadOptions(options?.imports));
 };`;
     })
     .join('\n\n');
@@ -539,6 +537,13 @@ export interface TargetWasmLoadOptions extends WasmLoadOptions {
   readonly url?: string | URL;
 }
 
+const isResponse = (value: WasmSource): value is Response =>
+  typeof Response !== 'undefined' && value instanceof Response;
+
+const createWasmLoadOptions = (
+  imports: WebAssembly.Imports | undefined
+): WasmLoadOptions | undefined => (imports ? { imports } : undefined);
+
 export interface WasmInstance<T extends object> {
   readonly exports: T;
   readonly memory: WebAssembly.Memory;
@@ -551,7 +556,7 @@ export interface WasmInstance<T extends object> {
 }
 
 const resolveWasmBytes = async (source: WasmSource): Promise<ArrayBuffer> => {
-  if (typeof Response !== 'undefined' && source instanceof Response) {
+  if (isResponse(source)) {
     return await source.arrayBuffer();
   }
   if (source instanceof URL || typeof source === 'string') {
@@ -561,6 +566,9 @@ const resolveWasmBytes = async (source: WasmSource): Promise<ArrayBuffer> => {
     }
     return await response.arrayBuffer();
   }
+  if (source instanceof ArrayBuffer) {
+    return source;
+  }
   if (ArrayBuffer.isView(source)) {
     const view = new Uint8Array(
       source.buffer,
@@ -569,7 +577,7 @@ const resolveWasmBytes = async (source: WasmSource): Promise<ArrayBuffer> => {
     );
     return view.slice().buffer;
   }
-  return source;
+  throw new TypeError('Unsupported wasm source.');
 };
 
 const getImportValue = (
