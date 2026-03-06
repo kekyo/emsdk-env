@@ -1479,8 +1479,13 @@ describe('buildWasm options', () => {
       expect(content).toContain(
         'new URL("../wasm/alpha.wasm", import.meta.url)'
       );
+      expect(content).toContain('const createWasmLoadOptions = (');
+      expect(content).toContain('if (source instanceof ArrayBuffer) {');
       expect(content).toContain('readonly url?: string | URL;');
       expect(content).toContain('readonly memory: WebAssembly.Memory;');
+      expect(content).toContain(
+        'return await loadWasm<T>(source, createWasmLoadOptions(options?.imports));'
+      );
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -1565,6 +1570,7 @@ describe('buildWasm options', () => {
       }
       const content = await readFile(generatedLoaderFile, 'utf8');
       expect(content).toContain('export const loadWasm = async');
+      expect(content).toContain('const createWasmLoadOptions = (');
       expect(content).not.toContain('loadLibalphaWasm');
       expect(content).not.toContain('new URL(');
     } finally {
