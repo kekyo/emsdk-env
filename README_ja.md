@@ -30,10 +30,8 @@ export default defineConfig({
   plugins: [
     // プラグインとして追加
     emsdkEnv({
-      // 依存ゼロのランタイムローダーを生成
-      generatedLoader: {
-        enable: true,
-      },
+      // WASMローダーコードを生成
+      generatedLoader: { enable: true },
       // ビルドターゲット
       targets: {
         // "add.wasm"を生成
@@ -95,13 +93,14 @@ project/
 ├── vite.config.ts
 ├── src/
 │   ├── generated/
-│   │   └── wasm-loader.ts
+│   │   └── wasm-loader.ts   // (自動生成)
 │   └── wasm/
-│       └── add.wasm
+│       └── add.wasm         // (ビルドされたWASMバイナリ)
 └── wasm/
     └── add.c
 ```
 
+- `wasm-loader.ts`は、WASMバイナリをロードして使用可能にするヘルパーコードです。
 - 上記の他に、OS のテンポラリディレクトリ配下にビルド用の一時ディレクトリが作られます。
   デフォルトの場所は `${TMPDIR}/emsdk-env`（Unix では通常 `/tmp/emsdk-env`）です。
   これはビルド時に使われ、通常はビルド後に削除されます。
@@ -111,31 +110,38 @@ project/
 
 ビルドされたバイナリが`src/wasm/`に配置される事に違和感を感じるかもしれませんが、これはViteサーバーがデフォルトでWASMバイナリに容易にアクセスできるパスだからです。
 
-`generatedLoader.enable` を `true` にすると、emsdk-env はデフォルトで `src/generated/wasm-loader.ts` に依存ゼロの TypeScript helper も生成します。
-この loader を使うと、最終的な WASM export をそのまま呼び出せます:
+`generatedLoader.enable` を `true` にすると、emsdk-env はデフォルトで `src/generated/wasm-loader.ts` にWASMローダーヘルパーコードも生成します。
+この loader を使うと、非常に簡単にWASMバイナリの関数を呼び出せます:
 
 ```typescript
 import { loadAddWasm } from './generated/wasm-loader';
 
+// WASMエクスポート関数の定義 (手動で定義が必要です)
 interface AddExports {
   add?: (a: number, b: number) => number;
 }
 
+// WASMバイナリをロードして使用可能にする
 const wasm = await loadAddWasm<AddExports>();
+
+// `add()`関数を取得
 const add = wasm.exports.add;
 if (typeof add !== 'function') {
   throw new Error('add function not found in wasm exports.');
 }
 
+// 関数を実行
 const result = add(1, 2);
-const memory = wasm.memory;
 ```
 
-`vite.config.ts` の `exports: ['_add']` は引き続き Emscripten のリンカ設定ですが、生成 loader は最終的な WASM export 名を公開するため、呼び出しは `wasm.exports.add` になります。
+- WASMエクスポート関数の定義は、自分で記述する必要が有ります。その際、エクスポートする関数のシンボル名は、
+  TypeScript上ではC/C++の関数名と同一ですが、 `exports: [...]` に指定するシンボル名は、
+  通常プレフィックスにアンダースコアが必要です（`add()` --> `_add`）。
 
-各 target wrapper は URL override も受け取れます:
+WASMバイナリの位置がデフォルトと異なる場合は、明示的にURLを指定することも出来ます:
 
 ```typescript
+// WASMバイナリの位置を指定してロード
 const wasm = await loadAddWasm<AddExports>({
   url: new URL('./alternate/add.wasm', import.meta.url),
 });
@@ -144,7 +150,6 @@ const wasm = await loadAddWasm<AddExports>({
 デフォルトのままで運用するなら、ほぼこれで構成作業はありません。
 
 他のトピックとしては、ソースファイルの明示的な指定、複数のコンパイルオプションの分離適用、複数のターゲット出力を扱う方法、アーカイブライブラリファイルの生成と参照、NPMパッケージの生成と参照、と言った機能があります。
-
 次の章より、これらについて説明します。
 
 ---

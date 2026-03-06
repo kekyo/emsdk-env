@@ -28,6 +28,8 @@ export default defineConfig({
   plugins: [
     // Add as a plugin
     emsdkEnv({
+      // Generate a runtime loader code
+      generatedLoader: { enable: true },
       // Build targets
       targets: {
         // Generate "add.wasm"
@@ -35,7 +37,9 @@ export default defineConfig({
           // Compiler options
           options: ['-O3', '-std=c99'],
           // Linker options
-          linkOptions: ['-s', 'STANDALONE_WASM=1', '--no-entry'],
+          linkOptions: ['--no-entry'],
+          // Linker directives
+          linkDirectives: { STANDALONE_WASM: 1 },
           // Exported symbols
           exports: ['_add'],
         },
@@ -86,12 +90,15 @@ project/
 ├── package.json
 ├── vite.config.ts
 ├── src/
+│   ├── generated/
+│   │   └── wasm-loader.ts   // (Generate automatically)
 │   └── wasm/
-│       └── add.wasm
+│       └── add.wasm         // (Built WASM binary)
 └── wasm/
     └── add.c
 ```
 
+- `wasm-loader.ts` is helper code that loads and makes WASM binaries usable.
 - In addition to the above, a temporary build directory is created under the OS temp directory.
   The default location is `${TMPDIR}/emsdk-env` (typically `/tmp/emsdk-env` on Unix).
   This directory is used during the build process and is typically deleted after the build completes.
@@ -99,7 +106,36 @@ project/
 
 Of course, you can change these. Specify them in the Vite plugin options.
 
-You might find it odd that the built binary is placed in `src/wasm/`, but this is because the Vite server defaults to a path where it can easily access WASM binaries.
+You might find it odd that the built binary is placed in `src/wasm/`,
+but this is because the Vite server defaults to a path where it can easily access WASM binaries.
+
+If `generatedLoader.enable` is set to `true`, emsdk-env also generates a WASM loader helper code by default at `src/generated/wasm-loader.ts`.
+That loader can call the final WASM exports directly:
+
+```typescript
+import { loadAddWasm } from './generated/wasm-loader';
+
+// WASM exported function declaration (You need to define it)
+interface AddExports {
+  add?: (a: number, b: number) => number;
+}
+
+// Load WASM binary and instantiates it
+const wasm = await loadAddWasm<AddExports>();
+
+// Get `add()` function entry point
+const add = wasm.exports.add;
+if (typeof add !== 'function') {
+  throw new Error('add function not found in wasm exports.');
+}
+
+// Then use it now
+const result = add(1, 2);
+```
+
+- You need to define WASM export functions yourself.
+  When doing so, the symbol name for the exported function is the same as the C/C++ function name in TypeScript,
+  but the symbol name specified in `exports: [...]` typically requires an underscore prefix (`add()` --> `_add`).
 
 If you plan to operate with the default settings, there is essentially no configuration work required.
 
