@@ -67,6 +67,27 @@ export interface PrepareEmsdkOptions {
 export type DefineValue = string | number | boolean | null | undefined;
 
 /**
+ * Input type for preprocessor defines.
+ */
+export type DefineInput =
+  | Record<string, DefineValue>
+  | Readonly<Map<string, DefineValue>>
+  | readonly string[];
+
+/**
+ * Value type for linker directives.
+ */
+export type LinkDirectiveValue = DefineValue | readonly string[];
+
+/**
+ * Input type for linker directives.
+ */
+export type LinkDirectiveInput =
+  | Record<string, LinkDirectiveValue>
+  | Readonly<Map<string, LinkDirectiveValue>>
+  | readonly string[];
+
+/**
  * Options for running wasm-opt on the linked output.
  */
 export interface WasmOptOptions {
@@ -87,12 +108,9 @@ export type WasmBuildTargetType = 'wasm' | 'archive';
 
 /**
  * Key-value declaration type.
- * @remarks Uses both defines and linkDirectives.
+ * @deprecated Use `DefineInput` or `LinkDirectiveInput`.
  */
-export type KeyValueInput =
-  | Record<string, DefineValue>
-  | Readonly<Map<string, DefineValue>>
-  | readonly string[];
+export type KeyValueInput = DefineInput;
 
 /**
  * Common build options shared across targets.
@@ -109,7 +127,7 @@ export interface WasmBuildCommonOptions {
   /**
    * Common linker directives mapped to `-s KEY=VALUE`.
    */
-  readonly linkDirectives?: KeyValueInput;
+  readonly linkDirectives?: LinkDirectiveInput;
   /**
    * Common symbols to export (mapped to `-s EXPORTED_FUNCTIONS=...`).
    */
@@ -125,7 +143,7 @@ export interface WasmBuildCommonOptions {
   /**
    * Common preprocessor defines applied as `-D` flags.
    */
-  readonly defines?: KeyValueInput;
+  readonly defines?: DefineInput;
 }
 
 /**
@@ -159,7 +177,7 @@ export interface WasmBuildTarget {
   /**
    * Linker directives mapped to `-s KEY=VALUE`.
    */
-  readonly linkDirectives?: KeyValueInput;
+  readonly linkDirectives?: LinkDirectiveInput;
   /**
    * Common symbols to export (mapped to `-s EXPORTED_FUNCTIONS=...`).
    */
@@ -175,7 +193,7 @@ export interface WasmBuildTarget {
   /**
    * Preprocessor defines applied as `-D` flags.
    */
-  readonly defines?: KeyValueInput;
+  readonly defines?: DefineInput;
 }
 
 /**
@@ -197,7 +215,7 @@ export interface WasmBuildSourceGroup {
   /**
    * Preprocessor defines applied as `-D` flags for this group.
    */
-  readonly defines?: KeyValueInput;
+  readonly defines?: DefineInput;
 }
 
 /**

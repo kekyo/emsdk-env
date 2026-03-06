@@ -11,7 +11,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { buildWasm } from '../src/build';
 import { runCommandWithEnv } from '../src/commands';
 import { prepareEmsdk } from '../src/emsdk';
-import type { DefineValue } from '../src/types';
+import type { DefineValue, LinkDirectiveValue } from '../src/types';
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const defaultBuildRoot = join(tmpdir(), 'emsdk-env');
@@ -700,6 +700,50 @@ describe('buildWasm options', () => {
       expect(linkArgs).toBeTruthy();
       expect(linkArgs).toContain('MODULARIZE');
       expect(linkArgs).toContain('EXPORT_ES6=1');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('supports array-valued linkDirectives and expands placeholders', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'emsdk-env-project-'));
+    const wasmDir = join(projectRoot, 'wasm');
+    await mkdir(wasmDir, { recursive: true });
+    await writeFile(join(wasmDir, 'alpha.c'), 'int alpha() { return 1; }');
+
+    const runCommandMock = vi.mocked(runCommandWithEnv);
+    runCommandMock.mockClear();
+
+    try {
+      await buildWasm({
+        root: projectRoot,
+        buildDir: join(projectRoot, '.wasm-build'),
+        rule: {
+          common: {
+            linkDirectives: new Map<string, LinkDirectiveValue>([
+              ['INCOMING_MODULE_JS_API', ['print', '{TARGET_NAME}Hook']],
+            ]),
+          },
+          targets: {
+            app: {
+              linkDirectives: {
+                EXPORTED_RUNTIME_METHODS: ['wasmMemory'],
+              },
+            },
+          },
+        },
+      });
+
+      const linkCalls = runCommandMock.mock.calls.filter((call) => {
+        const args = call[1] as string[] | undefined;
+        return (
+          Array.isArray(args) && args.includes('-o') && !args.includes('-c')
+        );
+      });
+      const linkArgs = linkCalls[0]?.[1] as string[] | undefined;
+      expect(linkArgs).toBeTruthy();
+      expect(linkArgs).toContain('INCOMING_MODULE_JS_API=["print","appHook"]');
+      expect(linkArgs).toContain('EXPORTED_RUNTIME_METHODS=["wasmMemory"]');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }

@@ -21,8 +21,10 @@ import { createConsoleLogger } from './logger';
 import type {
   BuildWasmOptions,
   BuildWasmResult,
+  DefineInput,
   DefineValue,
-  KeyValueInput,
+  LinkDirectiveInput,
+  LinkDirectiveValue,
   PrepareEmsdkOptions,
   WasmOptOptions,
   WasmBuildTargetType,
@@ -79,8 +81,8 @@ const normalizePrepareOptions = (
   };
 };
 
-const parseKeyValueInput = (values: readonly string[]) => {
-  const parsed: Record<string, DefineValue> = {};
+const parseStringKeyValueInput = (values: readonly string[]) => {
+  const parsed: Record<string, string | undefined> = {};
   for (const entry of values) {
     const index = entry.indexOf('=');
     if (index === -1) {
@@ -94,35 +96,59 @@ const parseKeyValueInput = (values: readonly string[]) => {
   return parsed;
 };
 
-const isKeyValueMap = (
-  value: KeyValueInput
-): value is Readonly<Map<string, DefineValue>> => value instanceof Map;
+const isDefineMap = (
+  input: DefineInput
+): input is Readonly<Map<string, DefineValue>> => input instanceof Map;
 
-const normalizeKeyValueInput = (
-  input: KeyValueInput | undefined
+const normalizeDefineInput = (
+  input: DefineInput | undefined
 ): Record<string, DefineValue> => {
   if (!input) {
     return {};
   }
   if (Array.isArray(input)) {
-    return parseKeyValueInput(input);
+    return parseStringKeyValueInput(input);
   }
-  if (isKeyValueMap(input)) {
+  if (isDefineMap(input)) {
     return Object.fromEntries(input);
   }
   return { ...(input as Record<string, DefineValue>) };
 };
 
+const isLinkDirectiveMap = (
+  input: LinkDirectiveInput
+): input is Readonly<Map<string, LinkDirectiveValue>> => input instanceof Map;
+
+const normalizeLinkDirectiveInput = (
+  input: LinkDirectiveInput | undefined
+): Record<string, LinkDirectiveValue> => {
+  if (!input) {
+    return {};
+  }
+  if (Array.isArray(input)) {
+    return parseStringKeyValueInput(input);
+  }
+  if (isLinkDirectiveMap(input)) {
+    return Object.fromEntries(input);
+  }
+  return { ...(input as Record<string, LinkDirectiveValue>) };
+};
+
 const mergeDefines = (
-  common?: KeyValueInput,
-  target?: KeyValueInput
+  common?: DefineInput,
+  target?: DefineInput
 ): Record<string, DefineValue> => ({
-  ...normalizeKeyValueInput(common),
-  ...normalizeKeyValueInput(target),
+  ...normalizeDefineInput(common),
+  ...normalizeDefineInput(target),
 });
 
-const mergeLinkDirectives = (common?: KeyValueInput, target?: KeyValueInput) =>
-  mergeDefines(common, target);
+const mergeLinkDirectives = (
+  common?: LinkDirectiveInput,
+  target?: LinkDirectiveInput
+): Record<string, LinkDirectiveValue> => ({
+  ...normalizeLinkDirectiveInput(common),
+  ...normalizeLinkDirectiveInput(target),
+});
 
 const resolveWasmOptEnabled = (
   common: WasmOptOptions | undefined,
@@ -246,17 +272,33 @@ const resolveDefines = (
   return resolved;
 };
 
+const resolveLinkDirectiveValue = (
+  value: LinkDirectiveValue,
+  env: Record<string, string>,
+  label: string
+): LinkDirectiveValue => {
+  if (typeof value === 'string') {
+    return expandPlaceholders(value, env, label);
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry, index) =>
+      expandPlaceholders(entry, env, `${label}[${index}]`)
+    );
+  }
+  return value;
+};
+
 const resolveLinkDirectives = (
-  directives: Record<string, DefineValue>,
+  directives: Record<string, LinkDirectiveValue>,
   env: Record<string, string>
 ) => {
-  const resolved: Record<string, DefineValue> = {};
+  const resolved: Record<string, LinkDirectiveValue> = {};
   for (const [key, value] of Object.entries(directives)) {
-    if (typeof value === 'string') {
-      resolved[key] = expandPlaceholders(value, env, `linkDirectives.${key}`);
-    } else {
-      resolved[key] = value;
-    }
+    resolved[key] = resolveLinkDirectiveValue(
+      value,
+      env,
+      `linkDirectives.${key}`
+    );
   }
   return resolved;
 };
@@ -302,14 +344,20 @@ const buildDefineFlags = (defines: Record<string, DefineValue>) =>
       : [`-D${key}=${String(value)}`]
   );
 
-const buildLinkDirectiveFlags = (directives: Record<string, DefineValue>) => {
+const serializeLinkDirectiveValue = (
+  value: Exclude<LinkDirectiveValue, null | undefined>
+) => (Array.isArray(value) ? JSON.stringify(value) : String(value));
+
+const buildLinkDirectiveFlags = (
+  directives: Record<string, LinkDirectiveValue>
+) => {
   if (Object.keys(directives).length === 0) {
     return [];
   }
   return Object.entries(directives).flatMap(([key, value]) =>
     value === null || value === undefined
       ? ['-s', key]
-      : ['-s', `${key}=${String(value)}`]
+      : ['-s', `${key}=${serializeLinkDirectiveValue(value)}`]
   );
 };
 
