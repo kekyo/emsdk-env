@@ -68,6 +68,9 @@ import emsdkEnv from 'emsdk-env/vite';
 export default defineConfig({
   plugins: [
     emsdkEnv({
+      generatedLoader: {
+        enable: true,
+      },
       common: {
         options: ['-O3', '-std=c99'],
         linkOptions: ['--no-entry'],
@@ -106,21 +109,24 @@ int add(int a, int b) {
   const runScript = `import { readFile } from 'fs/promises';
 import { resolve } from 'path';
 import { WASI } from 'node:wasi';
-
-const wasmPath = resolve('src', 'wasm', 'add.wasm');
-const wasmBuffer = await readFile(wasmPath);
+import { loadAddWasm } from '../src/generated/wasm-loader.ts';
 
 const wasi = new WASI({ version: 'preview1' });
-const { instance } = await WebAssembly.instantiate(wasmBuffer, {
-  wasi_snapshot_preview1: wasi.wasiImport,
+const wasmBase64 = (await readFile(resolve('src', 'wasm', 'add.wasm'))).toString(
+  'base64'
+);
+const wasm = await loadAddWasm({
+  url: \`data:application/wasm;base64,\${wasmBase64}\`,
+  imports: {
+    wasi_snapshot_preview1: wasi.wasiImport,
+  },
 });
 
-if (typeof instance.exports._initialize === 'function') {
-  wasi.initialize(instance);
+if (typeof wasm.initialize === 'function') {
+  wasi.initialize(wasm.instance);
 }
 
-const exports = instance.exports;
-const add = exports.add ?? exports._add;
+const add = wasm.exports.add;
 
 if (typeof add !== 'function') {
   throw new Error('add function not found in wasm exports.');
@@ -173,7 +179,7 @@ describe('test project generation', () => {
 
       const output = runCommandWithOutput(
         'node',
-        ['scripts/run.mjs'],
+        ['--experimental-transform-types', 'scripts/run.mjs'],
         projectDir
       );
       expect(output).toContain('add(2, 3) = 5');

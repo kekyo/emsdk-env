@@ -30,6 +30,10 @@ export default defineConfig({
   plugins: [
     // プラグインとして追加
     emsdkEnv({
+      // 依存ゼロのランタイムローダーを生成
+      generatedLoader: {
+        enable: true,
+      },
       // ビルドターゲット
       targets: {
         // "add.wasm"を生成
@@ -90,6 +94,8 @@ project/
 ├── package.json
 ├── vite.config.ts
 ├── src/
+│   ├── generated/
+│   │   └── wasm-loader.ts
 │   └── wasm/
 │       └── add.wasm
 └── wasm/
@@ -104,29 +110,35 @@ project/
 もちろん、これらは変更することが出来ます。Viteプラグインの引数に指定します。
 
 ビルドされたバイナリが`src/wasm/`に配置される事に違和感を感じるかもしれませんが、これはViteサーバーがデフォルトでWASMバイナリに容易にアクセスできるパスだからです。
-このように配置されたWASMバイナリは、以下のようなボイラープレートコードで呼び出し可能になります:
+
+`generatedLoader.enable` を `true` にすると、emsdk-env はデフォルトで `src/generated/wasm-loader.ts` に依存ゼロの TypeScript helper も生成します。
+この loader を使うと、最終的な WASM export をそのまま呼び出せます:
 
 ```typescript
-// WASMバイナリを読み込む
-const wasmUrl = new URL('./wasm/add.wasm', import.meta.url);
-const response = await fetch(wasmUrl);
-const wasmBuffer = await response.arrayBuffer();
+import { loadAddWasm } from './generated/wasm-loader';
 
-// WASMランタイムで実体化させる
-const { instance } = await WebAssembly.instantiate(wasmBuffer, {});
-
-// WASMバイナリ内の公開された関数エンドポイントを取得する
-const exports = instance.exports as {
+interface AddExports {
   add?: (a: number, b: number) => number;
-  _add?: (a: number, b: number) => number;
-};
-const add = exports.add ?? exports._add;
+}
+
+const wasm = await loadAddWasm<AddExports>();
+const add = wasm.exports.add;
 if (typeof add !== 'function') {
   throw new Error('add function not found in wasm exports.');
 }
 
-// 関数を呼び出す
 const result = add(1, 2);
+const memory = wasm.memory;
+```
+
+`vite.config.ts` の `exports: ['_add']` は引き続き Emscripten のリンカ設定ですが、生成 loader は最終的な WASM export 名を公開するため、呼び出しは `wasm.exports.add` になります。
+
+各 target wrapper は URL override も受け取れます:
+
+```typescript
+const wasm = await loadAddWasm<AddExports>({
+  url: new URL('./alternate/add.wasm', import.meta.url),
+});
 ```
 
 デフォルトのままで運用するなら、ほぼこれで構成作業はありません。
@@ -519,18 +531,23 @@ export default defineConfig({
 
 `emsdk-env/vite` に渡すオプション（`EmsdkVitePluginOptions`）の一覧です。
 
-| キー              | 型                                | デフォルト                    | 説明                                                                       |
-| :---------------- | :-------------------------------- | :---------------------------- | :------------------------------------------------------------------------- |
-| `emsdk`           | `PrepareEmsdkOptions`             | `{ targetVersion: 'latest' }` | Emscripten SDKの取得設定。                                                 |
-| `srcDir`          | `string`                          | `'wasm'`                      | C/C++ソースのルートディレクトリ（プロジェクトルート相対）。                |
-| `includeDir`      | `string`                          | `'include'`                   | デフォルトのインクルードディレクトリ（プロジェクトルート相対）。           |
-| `outDir`          | `string`                          | `'src/wasm'`                  | WASM出力ディレクトリ（プロジェクトルート相対）。                           |
-| `libDir`          | `string`                          | `'lib'`                       | アーカイブ出力ディレクトリ（プロジェクトルート相対）。                     |
-| `buildDir`        | `string`                          | `<OSのテンポラリ>/emsdk-env`  | 一時ビルドディレクトリ。                                                   |
-| `cleanupBuildDir` | `boolean`                         | `true`                        | ビルド後に一時ディレクトリを削除するか。                                   |
-| `imports`         | `string[]`                        | `[]`                          | 参照するNPMパッケージ名。`include`/`lib` を自動検出して `-I`/`-L` を追加。 |
-| `common`          | `WasmBuildCommonOptions`          | `undefined`                   | 全ターゲットに適用する共通設定。                                           |
-| `targets`         | `Record<string, WasmBuildTarget>` | 必須                          | ターゲット定義。キーがターゲット名。                                       |
+| キー              | 型                                       | デフォルト                    | 説明                                                                                          |
+| :---------------- | :--------------------------------------- | :---------------------------- | :-------------------------------------------------------------------------------------------- |
+| `emsdk`           | `PrepareEmsdkOptions`                    | `{ targetVersion: 'latest' }` | Emscripten SDKの取得設定。                                                                    |
+| `srcDir`          | `string`                                 | `'wasm'`                      | C/C++ソースのルートディレクトリ（プロジェクトルート相対）。                                   |
+| `includeDir`      | `string`                                 | `'include'`                   | デフォルトのインクルードディレクトリ（プロジェクトルート相対）。                              |
+| `outDir`          | `string`                                 | `'src/wasm'`                  | WASM出力ディレクトリ（プロジェクトルート相対）。                                              |
+| `libDir`          | `string`                                 | `'lib'`                       | アーカイブ出力ディレクトリ（プロジェクトルート相対）。                                        |
+| `buildDir`        | `string`                                 | `<OSのテンポラリ>/emsdk-env`  | 一時ビルドディレクトリ。                                                                      |
+| `cleanupBuildDir` | `boolean`                                | `true`                        | ビルド後に一時ディレクトリを削除するか。                                                      |
+| `imports`         | `string[]`                               | `[]`                          | 参照するNPMパッケージ名。`include`/`lib` を自動検出して `-I`/`-L` を追加。                    |
+| `generatedLoader` | `{ enable?: boolean; outFile?: string }` | `undefined`                   | `enable` が `true` の時に、ターゲットプロジェクトへ依存ゼロの TypeScript WASM loader を生成。 |
+| `common`          | `WasmBuildCommonOptions`                 | `undefined`                   | 全ターゲットに適用する共通設定。                                                              |
+| `targets`         | `Record<string, WasmBuildTarget>`        | 必須                          | ターゲット定義。キーがターゲット名。                                                          |
+
+`generatedLoader.enable` を `true` にした場合の既定出力先は `src/generated/wasm-loader.ts` です。
+生成ファイルには `loadWasm<T>()`, `WasmInstance<T>`, `loadAddWasm<T>()` のような target wrapper が含まれます。
+`generatedLoader.outFile` は、`srcDir` や `includeDirs` のような監視対象ディレクトリ配下には配置しないで下さい。
 
 `common` と `targets` 内で使える主なキーは以下です。
 

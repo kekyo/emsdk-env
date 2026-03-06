@@ -102,6 +102,20 @@ export interface WasmOptOptions {
 }
 
 /**
+ * Options for generating a zero-dependency TypeScript WASM loader file.
+ */
+export interface GeneratedLoaderOptions {
+  /**
+   * Enable generated loader output (defaults to false).
+   */
+  readonly enable?: boolean;
+  /**
+   * Output file path for the generated loader source (project-root relative by default).
+   */
+  readonly outFile?: string;
+}
+
+/**
  * Build target type for WASM or archive outputs.
  */
 export type WasmBuildTargetType = 'wasm' | 'archive';
@@ -263,6 +277,10 @@ export interface BuildWasmCommonOptions {
    */
   readonly libDir?: string;
   /**
+   * Generate a zero-dependency TypeScript loader into the target project.
+   */
+  readonly generatedLoader?: GeneratedLoaderOptions;
+  /**
    * Temporary build directory (defaults to OS temp dir).
    */
   readonly buildDir?: string;
@@ -306,4 +324,8 @@ export interface BuildWasmResult {
    * Output paths keyed by target name.
    */
   readonly outFiles: Record<string, string>;
+  /**
+   * Generated loader source path, when enabled.
+   */
+  readonly generatedLoaderFile?: string;
 }

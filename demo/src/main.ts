@@ -3,20 +3,18 @@
 // Under MIT.
 // https://github.com/kekyo/emsdk-env
 
+import { loadAddWasm } from './generated/wasm-loader';
+
+interface AddExports {
+  add?: (a: number, b: number) => number;
+}
+
 const run = async () => {
   const resultDiv = document.getElementById('results')!;
 
   try {
-    const wasmUrl = new URL('./wasm/add.wasm', import.meta.url);
-    const response = await fetch(wasmUrl);
-    const wasmBuffer = await response.arrayBuffer();
-    const { instance } = await WebAssembly.instantiate(wasmBuffer, {});
-
-    const exports = instance.exports as {
-      add?: (a: number, b: number) => number;
-      _add?: (a: number, b: number) => number;
-    };
-    const add = exports.add ?? exports._add;
+    const wasm = await loadAddWasm<AddExports>();
+    const add = wasm.exports.add;
     if (typeof add !== 'function') {
       throw new Error('add function not found in wasm exports.');
     }

@@ -38,3 +38,4 @@ artifacts/
 test_results/
 emsdk/
 .wasm-build/
+demo/src/generated/

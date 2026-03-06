@@ -31,6 +31,10 @@ export default defineConfig({
   plugins: [
     // Add as a plugin
     emsdkEnv({
+      // Generate a zero-dependency runtime loader
+      generatedLoader: {
+        enable: true,
+      },
       // Build targets
       targets: {
         // Generate "add.wasm"
@@ -91,6 +95,8 @@ project/
 ├── package.json
 ├── vite.config.ts
 ├── src/
+│   ├── generated/
+│   │   └── wasm-loader.ts
 │   └── wasm/
 │       └── add.wasm
 └── wasm/
@@ -106,29 +112,35 @@ Of course, you can change these. Specify them in the Vite plugin options.
 
 You might find it odd that the built binary is placed in `src/wasm/`,
 but this is because the Vite server defaults to a path where it can easily access WASM binaries.
-A WASM binary placed here can be called using boilerplate code like the following:
+
+If `generatedLoader.enable` is set to `true`, emsdk-env also generates a zero-dependency TypeScript helper by default at `src/generated/wasm-loader.ts`.
+That loader can call the final WASM exports directly:
 
 ```typescript
-// Load WASM binary
-const wasmUrl = new URL('./wasm/add.wasm', import.meta.url);
-const response = await fetch(wasmUrl);
-const wasmBuffer = await response.arrayBuffer();
+import { loadAddWasm } from './generated/wasm-loader';
 
-// Instantate with the WASM runtime
-const { instance } = await WebAssembly.instantiate(wasmBuffer, {});
-
-// Retrieve exposed function endpoints within a WASM binary
-const exports = instance.exports as {
+interface AddExports {
   add?: (a: number, b: number) => number;
-  _add?: (a: number, b: number) => number;
-};
-const add = exports.add ?? exports._add;
+}
+
+const wasm = await loadAddWasm<AddExports>();
+const add = wasm.exports.add;
 if (typeof add !== 'function') {
   throw new Error('add function not found in wasm exports.');
 }
 
-// Invoke WASM function
 const result = add(1, 2);
+const memory = wasm.memory;
+```
+
+`exports: ['_add']` in `vite.config.ts` is still the Emscripten linker setting, but the generated loader exposes the final WASM export name, so you access `wasm.exports.add`.
+
+Each generated target wrapper also accepts a URL override:
+
+```typescript
+const wasm = await loadAddWasm<AddExports>({
+  url: new URL('./alternate/add.wasm', import.meta.url),
+});
 ```
 
 If you plan to operate with the default settings, there is essentially no configuration work required.
@@ -521,18 +533,23 @@ Using this, you can specify only `wasmOpt.options` in `common` and control wheth
 
 The options accepted by `emsdk-env/vite` (`EmsdkVitePluginOptions`) are:
 
-| Key               | Type                              | Default                       | Description                                                                             |
-| :---------------- | :-------------------------------- | :---------------------------- | :-------------------------------------------------------------------------------------- |
-| `emsdk`           | `PrepareEmsdkOptions`             | `{ targetVersion: 'latest' }` | Emscripten SDK setup.                                                                   |
-| `srcDir`          | `string`                          | `'wasm'`                      | Root directory for C/C++ sources (project-root relative).                               |
-| `includeDir`      | `string`                          | `'include'`                   | Default include directory (project-root relative).                                      |
-| `outDir`          | `string`                          | `'src/wasm'`                  | WASM output directory (project-root relative).                                          |
-| `libDir`          | `string`                          | `'lib'`                       | Archive output directory (project-root relative).                                       |
-| `buildDir`        | `string`                          | `<OS temp>/emsdk-env`         | Temporary build directory.                                                              |
-| `cleanupBuildDir` | `boolean`                         | `true`                        | Whether to delete the temp directory after build.                                       |
-| `imports`         | `string[]`                        | `[]`                          | NPM packages to reference. Auto-detects `include`/`lib` and adds `-I`/`-L` accordingly. |
-| `common`          | `WasmBuildCommonOptions`          | `undefined`                   | Common settings applied to all targets.                                                 |
-| `targets`         | `Record<string, WasmBuildTarget>` | Required                      | Target definitions, keyed by target name.                                               |
+| Key               | Type                                     | Default                       | Description                                                                                        |
+| :---------------- | :--------------------------------------- | :---------------------------- | :------------------------------------------------------------------------------------------------- |
+| `emsdk`           | `PrepareEmsdkOptions`                    | `{ targetVersion: 'latest' }` | Emscripten SDK setup.                                                                              |
+| `srcDir`          | `string`                                 | `'wasm'`                      | Root directory for C/C++ sources (project-root relative).                                          |
+| `includeDir`      | `string`                                 | `'include'`                   | Default include directory (project-root relative).                                                 |
+| `outDir`          | `string`                                 | `'src/wasm'`                  | WASM output directory (project-root relative).                                                     |
+| `libDir`          | `string`                                 | `'lib'`                       | Archive output directory (project-root relative).                                                  |
+| `buildDir`        | `string`                                 | `<OS temp>/emsdk-env`         | Temporary build directory.                                                                         |
+| `cleanupBuildDir` | `boolean`                                | `true`                        | Whether to delete the temp directory after build.                                                  |
+| `imports`         | `string[]`                               | `[]`                          | NPM packages to reference. Auto-detects `include`/`lib` and adds `-I`/`-L` accordingly.            |
+| `generatedLoader` | `{ enable?: boolean; outFile?: string }` | `undefined`                   | Generate a zero-dependency TypeScript WASM loader into the target project when `enable` is `true`. |
+| `common`          | `WasmBuildCommonOptions`                 | `undefined`                   | Common settings applied to all targets.                                                            |
+| `targets`         | `Record<string, WasmBuildTarget>`        | Required                      | Target definitions, keyed by target name.                                                          |
+
+When `generatedLoader.enable` is `true`, the default output path is `src/generated/wasm-loader.ts`.
+The generated file contains `loadWasm<T>()`, `WasmInstance<T>`, and target wrappers such as `loadAddWasm<T>()`.
+Do not place `generatedLoader.outFile` under watched source/include directories such as `srcDir` or `includeDirs`.
 
 The main keys available under `common` and `targets` are:
 
