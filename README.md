@@ -140,12 +140,12 @@ const result = add(1, 2);
   When doing so, the symbol name for the exported function is the same as the C/C++ function name in TypeScript,
   but the symbol name specified in `exports: [...]` typically requires an underscore prefix (`add()` --> `_add`).
 
-If the WASM binary is located in a non-default directory, you can also explicitly specify the URL:
+If the WASM binary is located in a non-default directory, you can also explicitly specify the source:
 
 ```typescript
-// Load WASM binary with target URL
+// Load WASM binary with target source
 const wasm = await loadAddWasm<AddExports>({
-  url: new URL('./alternate/add.wasm', import.meta.url),
+  source: new URL('./alternate/add.wasm', import.meta.url),
 });
 ```
 

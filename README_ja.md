@@ -138,12 +138,12 @@ const result = add(1, 2);
   TypeScript上ではC/C++の関数名と同一ですが、 `exports: [...]` に指定するシンボル名は、
   通常プレフィックスにアンダースコアが必要です（`add()` --> `_add`）。
 
-WASMバイナリの位置がデフォルトと異なる場合は、明示的にURLを指定することも出来ます:
+WASMバイナリの位置がデフォルトと異なる場合は、明示的に source を指定することも出来ます:
 
 ```typescript
 // WASMバイナリの位置を指定してロード
 const wasm = await loadAddWasm<AddExports>({
-  url: new URL('./alternate/add.wasm', import.meta.url),
+  source: new URL('./alternate/add.wasm', import.meta.url),
 });
 ```
 
