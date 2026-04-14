@@ -27,7 +27,7 @@
       "require": "./dist/index.cjs"
     },
     "./vite": {
-      "types": "./dist/vite.d.ts",
+      "types": "./dist/vite/.d.ts",
       "import": "./dist/vite.mjs",
       "require": "./dist/vite.cjs"
     }
@@ -44,7 +44,7 @@
     "pack": "npm run build && screw-up pack --pack-destination ./artifacts/"
   },
   "dependencies": {
-    "async-primitives": ">=1.5.0",
+    "async-primitives": ">=1.7.0",
     "glob": ">=13.0.0"
   },
   "peerDependencies": {
@@ -55,9 +55,10 @@
     "@types/debug": ">=4.1.0",
     "@types/node": ">=20.0.0",
     "prettier-max": ">=1.14.0",
-    "screw-up": ">=1.26.0",
+    "screw-up": ">=1.32.0",
     "typescript": ">=5.0.0",
-    "vite-plugin-dts": ">=4.5.0",
+    "unplugin-dts": ">=1.0.0-beta.6",
+    "vite": ">=5.0.0",
     "vitest": ">=1.0.0"
   }
 }

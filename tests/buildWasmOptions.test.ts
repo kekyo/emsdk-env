@@ -1481,10 +1481,20 @@ describe('buildWasm options', () => {
       );
       expect(content).toContain('const createWasmLoadOptions = (');
       expect(content).toContain('if (source instanceof ArrayBuffer) {');
-      expect(content).toContain('readonly url?: string | URL;');
-      expect(content).toContain('readonly memory: WebAssembly.Memory;');
       expect(content).toContain(
-        'return await loadWasm<T>(source, createWasmLoadOptions(options?.imports));'
+        '/**\n * Supported input sources for loading a WASM binary.\n */'
+      );
+      expect(content).toContain('readonly source?: WasmSource;');
+      expect(content).toContain('readonly memory: WebAssembly.Memory;');
+      expect(content).toContain('readonly allExports: TAllExports;');
+      expect(content).toContain(
+        'Load and instantiate the generated "alpha" WASM target.'
+      );
+      expect(content).toContain(
+        'Load and instantiate a WASM module from the provided source.'
+      );
+      expect(content).toContain(
+        'return await loadWasm<TExports, TAllExports>(source, createWasmLoadOptions(options?.imports));'
       );
     } finally {
       await rm(projectRoot, { recursive: true, force: true });

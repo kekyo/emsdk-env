@@ -116,7 +116,7 @@ const wasmBase64 = (await readFile(resolve('src', 'wasm', 'add.wasm'))).toString
   'base64'
 );
 const wasm = await loadAddWasm({
-  url: \`data:application/wasm;base64,\${wasmBase64}\`,
+  source: \`data:application/wasm;base64,\${wasmBase64}\`,
   imports: {
     wasi_snapshot_preview1: wasi.wasiImport,
   },

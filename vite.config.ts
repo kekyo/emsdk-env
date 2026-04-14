@@ -6,7 +6,7 @@
 import { resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { defineConfig } from 'vite';
-import dts from 'vite-plugin-dts';
+import dts from 'unplugin-dts/vite';
 import screwUp from 'screw-up';
 import prettierMax from 'prettier-max';
 
@@ -18,9 +18,7 @@ export default defineConfig({
     screwUp({
       outputMetadataFile: true,
     }),
-    dts({
-      rollupTypes: true,
-    }),
+    dts(),
   ],
   build: {
     lib: {
@@ -39,7 +37,7 @@ export default defineConfig({
       fileName: (format, entryName) =>
         `${entryName}.${format === 'es' ? 'mjs' : 'cjs'}`,
     },
-    rollupOptions: {
+    rolldownOptions: {
       external: [
         'child_process',
         'fs',
