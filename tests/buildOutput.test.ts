@@ -27,12 +27,16 @@ describe('build output', () => {
 
     for (const buildFile of buildFiles) {
       const content = await readFile(buildFile, 'utf8');
-      const match = content.match(/moduleApi\s*=\s*await\s*import\(([^)]+)\)/);
-      if (!match) {
-        throw new Error(`moduleApi import not found in ${buildFile}.`);
+      const imports = [...content.matchAll(/await\s*import\(([^)]+)\)/g)].map(
+        (match) => match[1] ?? ''
+      );
+      const moduleImport = imports.find((specifier) =>
+        specifier.includes('node:module')
+      );
+      if (!moduleImport) {
+        throw new Error(`node:module import not found in ${buildFile}.`);
       }
-      expect(match[1]).toContain('node:module');
-      expect(match[1]).not.toContain('__vite-browser-external');
+      expect(moduleImport).not.toContain('__vite-browser-external');
     }
   });
 });
