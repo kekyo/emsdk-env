@@ -27,7 +27,7 @@
       "require": "./dist/index.cjs"
     },
     "./vite": {
-      "types": "./dist/vite/.d.ts",
+      "types": "./dist/vite/index.d.ts",
       "import": "./dist/vite.mjs",
       "require": "./dist/vite.cjs"
     }
